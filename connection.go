@@ -32,8 +32,9 @@ type Connection struct {
 }
 
 var (
-	symbolHandlers  = make(map[string][]func(Message))
-	asyncReadActive = false
+	heartbeatHandlers = make([]func(*HeartBeat), 0)
+	symbolHandlers    = make(map[string][]func(Message))
+	asyncReadActive   = false
 )
 
 var (
@@ -42,6 +43,11 @@ var (
 	ErrNetworkRead    = errors.New("of: network read")
 	ErrProtoRead      = errors.New("of: proto read")
 )
+
+// AddHeartbeatSubscription subscribes a handler to heartbeat messages
+func (c *Connection) AddHeartbeatSubscription(handler func(*HeartBeat)) {
+	heartbeatHandlers = append(heartbeatHandlers, handler)
+}
 
 // AddSymbolSubscription subscribes a handler for messages for given
 // slice of symbols
@@ -210,6 +216,21 @@ func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 	)
 
 	switch ty := ofmsg.Data.(type) {
+	case *OpenfeedGatewayMessage_HeartBeat:
+		// A bit of a special case
+		hb := ofmsg.GetHeartBeat()
+		if hb == nil {
+			return msg, fmt.Errorf("of: nil heartbeat")
+		}
+
+		for _, h := range heartbeatHandlers {
+			h(hb)
+		}
+
+		msg.MessageType = MessageType_HEARTBEAT
+		msg.Message = ofmsg.Data
+
+		return msg, nil
 	case *OpenfeedGatewayMessage_InstrumentDefinition:
 		msg.MessageType = MessageType_INSTRUMENT_DEFINITION
 		ary = symbolHandlers[ofmsg.GetInstrumentDefinition().Symbol]

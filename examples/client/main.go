@@ -10,12 +10,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"time"
 
 	openfeed "github.com/openfeed-org/sdk-go"
 )
 
 func main() {
+	log.SetOutput(os.Stdout)
 	log.SetFlags(0)
 
 	username := flag.String("username", "", "The username")
@@ -56,6 +59,11 @@ func main() {
 		default:
 			fmt.Println("Unhandled message type", msg.MessageType)
 		}
+	})
+
+	conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
+		t := time.Unix(0, msg.GetTransactionTime())
+		fmt.Println("HEARTBEAT", t)
 	})
 
 	conn.Start()
