@@ -11,16 +11,20 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"reflect"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
 )
 
+// Credentials encapsulates the username/password
 type Credentials struct {
 	Username string
 	Password string
 }
 
+// Connection is the main struct that holds the
+// underpinning websocket connection
 type Connection struct {
 	credentials   *Credentials
 	connection    *websocket.Conn
@@ -33,10 +37,14 @@ var (
 )
 
 var (
-	ErrNetworkRead = errors.New("of: network read")
-	ErrProtoRead   = errors.New("of: proto read")
+	ErrInvalidLogin   = errors.New("of: invalid login")
+	ErrNetworkConnect = errors.New("of: connect")
+	ErrNetworkRead    = errors.New("of: network read")
+	ErrProtoRead      = errors.New("of: proto read")
 )
 
+// AddSymbolSubscription subscribes a handler for messages for given
+// slice of symbols
 func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Message)) error {
 	ofreq := OpenfeedGatewayRequest{
 		Data: &OpenfeedGatewayRequest_SubscriptionRequest{
@@ -89,14 +97,13 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Messag
 	return nil
 }
 
+// Close closes the connection
 func (c *Connection) Close() {
 	c.connection.Close()
 }
 
-func (c *Connection) Connection() *websocket.Conn {
-	return c.connection
-}
-
+// Login sends the login request to the server, and returns
+// true/false with optional error information
 func (c *Connection) Login() (bool, error) {
 
 	ofgwlr := OpenfeedGatewayRequest_LoginRequest{
@@ -124,19 +131,31 @@ func (c *Connection) Login() (bool, error) {
 
 	c.loginResponse = ofmsg.GetLoginResponse()
 
-	fmt.Println(ofmsg)
-	fmt.Print(c.loginResponse)
+	if c.loginResponse != nil {
+		st := c.loginResponse.GetStatus()
+		if st != nil {
+			switch st.GetResult() {
+			case Result_INVALID_CREDENTIALS:
+				return false, ErrInvalidLogin
+			case Result_SUCCESS:
+				return true, nil
+			default:
+				return false, fmt.Errorf("of: login failure - %s", st.GetMessage())
+			}
+		}
+	}
 
-	return true, nil
+	return false, fmt.Errorf("of: login failed, invalid response")
 }
 
+// Connect connects to the server
 func Connect(credentials Credentials, server string) (*Connection, error) {
 	var connection Connection
 
 	u := url.URL{Scheme: "ws", Host: server, Path: "/ws"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("connect error. %w", err)
+		return nil, ErrNetworkConnect
 	}
 
 	connection.credentials = &credentials
@@ -145,47 +164,10 @@ func Connect(credentials Credentials, server string) (*Connection, error) {
 	return &connection, nil
 }
 
-func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
-	var msg = Message{}
-
-	switch ty := ofmsg.Data.(type) {
-	case *OpenfeedGatewayMessage_MarketSnapshot:
-		msg.MessageType = MessageType_MARKET_SNAPSHOT
-		msg.Message = ofmsg.Data
-		ms := ofmsg.GetMarketSnapshot()
-		ary := symbolHandlers[ms.Symbol]
-		if ary != nil {
-			for _, h := range ary {
-				h(msg)
-			}
-		}
-	case *OpenfeedGatewayMessage_MarketUpdate:
-		msg.MessageType = MessageType_MARKET_UPDATE
-		msg.Message = ofmsg.Data
-		mu := ofmsg.GetMarketUpdate()
-		ary := symbolHandlers[mu.Symbol]
-		if ary != nil {
-			for _, h := range ary {
-				h(msg)
-			}
-		}
-	case *OpenfeedGatewayMessage_SubscriptionResponse:
-		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
-		msg.Message = ofmsg.Data
-		sr := ofmsg.GetSubscriptionResponse()
-		ary := symbolHandlers[sr.Symbol]
-		if ary != nil {
-			for _, h := range ary {
-				h(msg)
-			}
-		}
-	default:
-		log.Printf("WARN: Unhandled message type. %s", ty)
-	}
-
-	return msg, nil
-}
-
+// Start spins a go routine which then continuosly reads the messages
+// from the websocket connection, unmarshals the protobuf into
+// Openfeed messages, and then calls the registered handlers for a given
+// symbol
 func (c *Connection) Start() {
 	done := make(chan struct{})
 
@@ -219,4 +201,38 @@ func (c *Connection) Start() {
 			return
 		}
 	}
+}
+
+func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
+	var (
+		ary []func(Message)
+		msg = Message{}
+	)
+
+	switch ty := ofmsg.Data.(type) {
+	case *OpenfeedGatewayMessage_InstrumentDefinition:
+		msg.MessageType = MessageType_INSTRUMENT_DEFINITION
+		ary = symbolHandlers[ofmsg.GetInstrumentDefinition().Symbol]
+	case *OpenfeedGatewayMessage_MarketSnapshot:
+		msg.MessageType = MessageType_MARKET_SNAPSHOT
+		ary = symbolHandlers[ofmsg.GetMarketSnapshot().Symbol]
+	case *OpenfeedGatewayMessage_MarketUpdate:
+		msg.MessageType = MessageType_MARKET_UPDATE
+		ary = symbolHandlers[ofmsg.GetMarketUpdate().Symbol]
+	case *OpenfeedGatewayMessage_SubscriptionResponse:
+		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
+		ary = symbolHandlers[ofmsg.GetSubscriptionResponse().Symbol]
+	default:
+		log.Printf("WARN: Unhandled message type. %s. %s", reflect.TypeOf(ofmsg.Data), ty)
+		return Message{}, fmt.Errorf("of: unhandled message type %s", reflect.TypeOf(ofmsg.Data))
+	}
+
+	msg.Message = ofmsg.Data
+	if ary != nil {
+		for _, h := range ary {
+			h(msg)
+		}
+	}
+
+	return msg, nil
 }

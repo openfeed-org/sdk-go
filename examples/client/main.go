@@ -43,7 +43,19 @@ func main() {
 	}
 
 	conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), func(msg openfeed.Message) {
-		fmt.Println("MSG", msg)
+		switch msg.MessageType {
+		case openfeed.MessageType_INSTRUMENT_DEFINITION:
+			fmt.Println("INST DEF", msg.Message)
+		case openfeed.MessageType_MARKET_SNAPSHOT:
+			fmt.Println("MKT SNAP", msg.Message)
+		case openfeed.MessageType_MARKET_UPDATE:
+			fmt.Println("MKT UPD", msg.Message)
+		case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
+			fmt.Println("SUB RESP", msg.Message)
+
+		default:
+			fmt.Println("Unhandled message type", msg.MessageType)
+		}
 	})
 
 	conn.Start()
