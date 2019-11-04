@@ -10,11 +10,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/url"
 	"reflect"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
+)
+
+var (
+	ErrAlreadyConnected = errors.New("of: already connected")
+	ErrInvalidLogin     = errors.New("of: invalid login")
+	ErrNetworkConnect   = errors.New("of: connect")
+	ErrNetworkRead      = errors.New("of: network read")
+	ErrProtoRead        = errors.New("of: proto read")
 )
 
 // Credentials encapsulates the username/password
@@ -26,32 +36,31 @@ type Credentials struct {
 // Connection is the main struct that holds the
 // underpinning websocket connection
 type Connection struct {
-	credentials   *Credentials
-	connection    *websocket.Conn
-	loginResponse *LoginResponse
+	credentials       *Credentials
+	server            string
+	connection        *websocket.Conn
+	loginResponse     *LoginResponse
+	heartbeatHandlers []func(*HeartBeat)
+	symbolHandlers    map[string][]func(Message)
 }
-
-var (
-	heartbeatHandlers = make([]func(*HeartBeat), 0)
-	symbolHandlers    = make(map[string][]func(Message))
-	asyncReadActive   = false
-)
-
-var (
-	ErrInvalidLogin   = errors.New("of: invalid login")
-	ErrNetworkConnect = errors.New("of: connect")
-	ErrNetworkRead    = errors.New("of: network read")
-	ErrProtoRead      = errors.New("of: proto read")
-)
 
 // AddHeartbeatSubscription subscribes a handler to heartbeat messages
 func (c *Connection) AddHeartbeatSubscription(handler func(*HeartBeat)) {
-	heartbeatHandlers = append(heartbeatHandlers, handler)
+	c.heartbeatHandlers = append(c.heartbeatHandlers, handler)
 }
 
-// AddSymbolSubscription subscribes a handler for messages for given
-// slice of symbols
-func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Message)) error {
+// AddSymbolSubscription subscribes a handler for messages for given slice of symbols
+func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Message)) {
+	for _, s := range symbols {
+		if c.symbolHandlers[s] == nil {
+			c.symbolHandlers[s] = make([]func(Message), 0)
+		}
+
+		c.symbolHandlers[s] = append(c.symbolHandlers[s], handler)
+	}
+}
+
+func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 	ofreq := OpenfeedGatewayRequest{
 		Data: &OpenfeedGatewayRequest_SubscriptionRequest{
 			SubscriptionRequest: &SubscriptionRequest{
@@ -62,13 +71,7 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Messag
 		},
 	}
 
-	for _, s := range symbols {
-		if symbolHandlers[s] == nil {
-			symbolHandlers[s] = make([]func(Message), 0)
-		}
-
-		symbolHandlers[s] = append(symbolHandlers[s], handler)
-
+	for s := range c.symbolHandlers {
 		ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests = append(
 			ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests,
 			&SubscriptionRequest_Request{
@@ -79,28 +82,7 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Messag
 		)
 	}
 
-	ba, _ := proto.Marshal(&ofreq)
-	c.connection.WriteMessage(2, ba)
-
-	// Since this method could be called at any point, we can't
-	// rely on strict in -> out, so the responses will come on the
-	// reader thread
-
-	if !asyncReadActive {
-		_, message, err := c.connection.ReadMessage()
-		if err != nil {
-			return ErrProtoRead
-		}
-
-		var ofmsg OpenfeedGatewayMessage
-		err = proto.Unmarshal(message, &ofmsg)
-		if err != nil {
-			return ErrProtoRead
-		}
-
-		broadcastMessage(&ofmsg)
-	}
-	return nil
+	return &ofreq
 }
 
 // Close closes the connection
@@ -110,8 +92,7 @@ func (c *Connection) Close() {
 
 // Login sends the login request to the server, and returns
 // true/false with optional error information
-func (c *Connection) Login() (bool, error) {
-
+func (c *Connection) login() (bool, error) {
 	ofgwlr := OpenfeedGatewayRequest_LoginRequest{
 		LoginRequest: &LoginRequest{
 			Username: c.credentials.Username,
@@ -155,61 +136,95 @@ func (c *Connection) Login() (bool, error) {
 }
 
 // Connect connects to the server
-func Connect(credentials Credentials, server string) (*Connection, error) {
-	var connection Connection
-
-	u := url.URL{Scheme: "ws", Host: server, Path: "/ws"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, ErrNetworkConnect
+func NewConnection(credentials Credentials, server string) *Connection {
+	var connection = Connection{
+		credentials:       &credentials,
+		server:            server,
+		heartbeatHandlers: make([]func(*HeartBeat), 0),
+		symbolHandlers:    make(map[string][]func(Message)),
 	}
 
-	connection.credentials = &credentials
-	connection.connection = c
-
-	return &connection, nil
+	return &connection
 }
 
 // Start spins a go routine which then continuosly reads the messages
 // from the websocket connection, unmarshals the protobuf into
 // Openfeed messages, and then calls the registered handlers for a given
 // symbol
-func (c *Connection) Start() {
-	done := make(chan struct{})
+func (c *Connection) Start() error {
+	var connectCount int64
 
-	go func() {
-		asyncReadActive = true
-		for {
-			defer close(done)
-			_, message, err := c.connection.ReadMessage()
-			if err != nil {
-				log.Println("read:", err)
-				return
-			}
-
-			var ofmsg OpenfeedGatewayMessage
-			err = proto.Unmarshal(message, &ofmsg)
-			if err != nil {
-				log.Printf("Unable to unmarshal gateway message. %v", err)
-				break
-			}
-
-			broadcastMessage(&ofmsg)
-		}
-
-		asyncReadActive = false
-	}()
+	if c.connection != nil {
+		return ErrAlreadyConnected
+	}
 
 	for {
-		select {
-		case <-done:
-			log.Println("done")
-			return
+		// Connect
+		conn, err := connect(c.server)
+		if err != nil && connectCount == 0 {
+			return ErrNetworkConnect
+		} else if err == nil {
+			c.connection = conn
+
+			// Login
+			_, err := c.login()
+			if err != nil {
+				return err
+			}
+
+			// Request Symbols
+			ofreq := c.createSymbolRequest()
+			ba, _ := proto.Marshal(ofreq)
+			c.connection.WriteMessage(2, ba)
+
+			chReader := make(chan struct{})
+			// Listen for data
+			go func() {
+				for {
+					// There's a server sent heartbeat every 10 seconds
+					c.connection.SetReadDeadline(time.Now().Add(15 * time.Second))
+					_, message, err := c.connection.ReadMessage()
+					if err != nil {
+						log.Println("read:", err)
+						c.connection = nil
+						break
+					}
+
+					var ofmsg OpenfeedGatewayMessage
+					err = proto.Unmarshal(message, &ofmsg)
+					if err != nil {
+						log.Printf("Unable to unmarshal gateway message. %v", err)
+
+					} else {
+						c.broadcastMessage(&ofmsg)
+					}
+				}
+
+				close(chReader)
+			}()
+
+		L2:
+			for {
+				select {
+				case <-chReader:
+					break L2
+				}
+			}
 		}
+
+		log.Println("of: caught network event")
+
+		rand.Seed(time.Now().UnixNano())
+		sec := rand.Intn(4) + 1
+		log.Printf("of: reconnecting in %d seconds", sec)
+		time.Sleep(time.Duration(sec) * time.Second)
+
+		connectCount++
 	}
+
 }
 
-func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
+func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 	var (
 		ary []func(Message)
 		msg = Message{}
@@ -223,7 +238,7 @@ func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 			return msg, fmt.Errorf("of: nil heartbeat")
 		}
 
-		for _, h := range heartbeatHandlers {
+		for _, h := range c.heartbeatHandlers {
 			h(hb)
 		}
 
@@ -233,16 +248,16 @@ func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 		return msg, nil
 	case *OpenfeedGatewayMessage_InstrumentDefinition:
 		msg.MessageType = MessageType_INSTRUMENT_DEFINITION
-		ary = symbolHandlers[ofmsg.GetInstrumentDefinition().Symbol]
+		ary = c.symbolHandlers[ofmsg.GetInstrumentDefinition().Symbol]
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		msg.MessageType = MessageType_MARKET_SNAPSHOT
-		ary = symbolHandlers[ofmsg.GetMarketSnapshot().Symbol]
+		ary = c.symbolHandlers[ofmsg.GetMarketSnapshot().Symbol]
 	case *OpenfeedGatewayMessage_MarketUpdate:
 		msg.MessageType = MessageType_MARKET_UPDATE
-		ary = symbolHandlers[ofmsg.GetMarketUpdate().Symbol]
+		ary = c.symbolHandlers[ofmsg.GetMarketUpdate().Symbol]
 	case *OpenfeedGatewayMessage_SubscriptionResponse:
 		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
-		ary = symbolHandlers[ofmsg.GetSubscriptionResponse().Symbol]
+		ary = c.symbolHandlers[ofmsg.GetSubscriptionResponse().Symbol]
 	default:
 		log.Printf("WARN: Unhandled message type. %s. %s", reflect.TypeOf(ofmsg.Data), ty)
 		return Message{}, fmt.Errorf("of: unhandled message type %s", reflect.TypeOf(ofmsg.Data))
@@ -256,4 +271,14 @@ func broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 	}
 
 	return msg, nil
+}
+
+func connect(server string) (*websocket.Conn, error) {
+	u := url.URL{Scheme: "ws", Host: server, Path: "/ws"}
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }

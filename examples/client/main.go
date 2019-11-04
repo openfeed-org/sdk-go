@@ -18,8 +18,8 @@ import (
 )
 
 func main() {
+
 	log.SetOutput(os.Stdout)
-	log.SetFlags(0)
 
 	username := flag.String("username", "", "The username")
 	password := flag.String("password", "", "The password")
@@ -27,23 +27,12 @@ func main() {
 
 	flag.Parse()
 
-	conn, err := openfeed.Connect(openfeed.Credentials{
+	conn := openfeed.NewConnection(openfeed.Credentials{
 		Username: *username,
 		Password: *password,
 	}, *server)
 
-	if err != nil {
-		log.Printf("Error connecting to %s. %v", *server, err)
-		return
-	}
-
 	defer conn.Close()
-
-	b, err := conn.Login()
-	if !b || err != nil {
-		log.Printf("Error Logging in. %v", err)
-		return
-	}
 
 	conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), func(msg openfeed.Message) {
 		switch msg.MessageType {
@@ -66,5 +55,6 @@ func main() {
 		fmt.Println("HEARTBEAT", t)
 	})
 
-	conn.Start()
+	err := conn.Start()
+	log.Printf("Error on start. %v", err)
 }
