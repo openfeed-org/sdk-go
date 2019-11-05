@@ -17,6 +17,22 @@ import (
 	openfeed "github.com/openfeed-org/sdk-go"
 )
 
+func messageHandler(msg openfeed.Message) {
+	switch msg.MessageType {
+	case openfeed.MessageType_INSTRUMENT_DEFINITION:
+		fmt.Println("INST DEF", msg.Message)
+	case openfeed.MessageType_MARKET_SNAPSHOT:
+		fmt.Println("MKT SNAP", msg.Message)
+	case openfeed.MessageType_MARKET_UPDATE:
+		fmt.Println("MKT UPD", msg.Message)
+	case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
+		fmt.Println("SUB RESP", msg.Message)
+
+	default:
+		fmt.Println("Unhandled message type", msg.MessageType)
+	}
+}
+
 func main() {
 
 	log.SetOutput(os.Stdout)
@@ -24,6 +40,7 @@ func main() {
 	username := flag.String("username", "", "The username")
 	password := flag.String("password", "", "The password")
 	server := flag.String("server", "", "The server")
+	exchange := flag.Bool("exchange", false, "Exchanges mode.")
 
 	flag.Parse()
 
@@ -34,21 +51,11 @@ func main() {
 
 	defer conn.Close()
 
-	conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), func(msg openfeed.Message) {
-		switch msg.MessageType {
-		case openfeed.MessageType_INSTRUMENT_DEFINITION:
-			fmt.Println("INST DEF", msg.Message)
-		case openfeed.MessageType_MARKET_SNAPSHOT:
-			fmt.Println("MKT SNAP", msg.Message)
-		case openfeed.MessageType_MARKET_UPDATE:
-			fmt.Println("MKT UPD", msg.Message)
-		case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
-			fmt.Println("SUB RESP", msg.Message)
-
-		default:
-			fmt.Println("Unhandled message type", msg.MessageType)
-		}
-	})
+	if *exchange {
+		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+	} else {
+		conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+	}
 
 	conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
 		t := time.Unix(0, msg.GetTransactionTime())
