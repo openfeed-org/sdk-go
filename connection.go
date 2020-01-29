@@ -29,6 +29,7 @@ var (
 
 var (
 	instrumentDefinitions = make(map[int64]*InstrumentDefinition)
+	instrumentsBySymbol   = make(map[string]*InstrumentDefinition)
 )
 
 // Credentials encapsulates the username/password
@@ -45,13 +46,15 @@ type Connection struct {
 	connection        *websocket.Conn
 	loginResponse     *LoginResponse
 	exchangeHandlers  map[string][]func(Message)
-	heartbeatHandlers []func(*HeartBeat)
+	heartbeatHandlers []HeartbeatHandler
 	symbolHandlers    map[string][]func(Message)
 	exchangesMode     bool
 }
 
+type HeartbeatHandler func(*HeartBeat)
+
 // AddHeartbeatSubscription subscribes a handler to heartbeat messages
-func (c *Connection) AddHeartbeatSubscription(handler func(*HeartBeat)) {
+func (c *Connection) AddHeartbeatSubscription(handler HeartbeatHandler) {
 	c.heartbeatHandlers = append(c.heartbeatHandlers, handler)
 }
 
@@ -81,7 +84,17 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Messag
 
 // Close closes the connection
 func (c *Connection) Close() {
-	c.connection.Close()
+	if c.connection != nil {
+		c.connection.Close()
+	}
+}
+
+func GetInstrumentDefinition(id int64) *InstrumentDefinition {
+	return instrumentDefinitions[id]
+}
+
+func GetInstrumentDefinitionBySymbol(symbol string) *InstrumentDefinition {
+	return instrumentsBySymbol[symbol]
 }
 
 // Connect connects to the server
@@ -90,7 +103,7 @@ func NewConnection(credentials Credentials, server string) *Connection {
 		credentials:       &credentials,
 		server:            server,
 		exchangeHandlers:  make(map[string][]func(Message)),
-		heartbeatHandlers: make([]func(*HeartBeat), 0),
+		heartbeatHandlers: make([]HeartbeatHandler, 0),
 		symbolHandlers:    make(map[string][]func(Message)),
 	}
 
@@ -212,6 +225,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		msg.MessageType = MessageType_INSTRUMENT_DEFINITION
 		idf = ofmsg.GetInstrumentDefinition()
 		instrumentDefinitions[idf.GetMarketId()] = idf
+		instrumentsBySymbol[idf.Symbol] = idf
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		msg.MessageType = MessageType_MARKET_SNAPSHOT
 		idf = instrumentDefinitions[ofmsg.GetMarketSnapshot().GetMarketId()]
@@ -255,6 +269,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 func connect(server string) (*websocket.Conn, error) {
 	u := url.URL{Scheme: "ws", Host: server, Path: "/ws"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+
 	if err != nil {
 		return nil, err
 	}
