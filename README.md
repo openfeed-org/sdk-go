@@ -16,4 +16,4 @@ To request a set of symbols, run:
 
 To request a set of exchanges, run:
 
-`go run *.go --username=MyUsername --password=MyPassword --server=openfeed.aws.barchart.com --exchnage exchange1,exchange2`
+`go run *.go --username=MyUsername --password=MyPassword --server=openfeed.aws.barchart.com --exchange exchange1,exchange2`

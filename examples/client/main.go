@@ -39,11 +39,12 @@ func main() {
 
 	username := flag.String("username", "", "The username")
 	password := flag.String("password", "", "The password")
-	server := flag.String("server", "", "The server")
+	server := flag.String("server", "openfeed.aws.barchart.com", "The server")
 	exchange := flag.Bool("exchange", false, "Exchanges mode.")
 
 	flag.Parse()
 
+	fmt.Printf("Using %s/%s connectiong to %s", *username, *password, *server)
 	conn := openfeed.NewConnection(openfeed.Credentials{
 		Username: *username,
 		Password: *password,

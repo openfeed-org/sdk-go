@@ -97,6 +97,51 @@ func GetInstrumentDefinitionBySymbol(symbol string) *InstrumentDefinition {
 	return instrumentsBySymbol[symbol]
 }
 
+func (c *Connection) CreateInstrumentRequestByChannelId(id int32) *OpenfeedGatewayRequest {
+	ofreq := OpenfeedGatewayRequest{
+		Data: &OpenfeedGatewayRequest_InstrumentRequest{
+			InstrumentRequest: &InstrumentRequest{
+				Token: c.loginResponse.GetToken(),
+				Request: &InstrumentRequest_ChannelId{
+					ChannelId: id,
+				},
+			},
+		},
+	}
+
+	return &ofreq
+}
+
+func (c *Connection) CreateInstrumentRequestByExchange(exch string) *OpenfeedGatewayRequest {
+	ofreq := OpenfeedGatewayRequest{
+		Data: &OpenfeedGatewayRequest_InstrumentRequest{
+			InstrumentRequest: &InstrumentRequest{
+				Token: c.loginResponse.GetToken(),
+				Request: &InstrumentRequest_Exchange{
+					Exchange: exch,
+				},
+			},
+		},
+	}
+
+	return &ofreq
+}
+
+func (c *Connection) CreateInstrumentReferenceRequest(exch string) *OpenfeedGatewayRequest {
+	ofreq := OpenfeedGatewayRequest{
+		Data: &OpenfeedGatewayRequest_InstrumentReferenceRequest{
+			InstrumentReferenceRequest: &InstrumentReferenceRequest{
+				Token: c.loginResponse.GetToken(),
+				Request: &InstrumentReferenceRequest_Exchange{
+					Exchange: exch,
+				},
+			},
+		},
+	}
+
+	return &ofreq
+}
+
 // Connect connects to the server
 func NewConnection(credentials Credentials, server string) *Connection {
 	var connection = Connection{
@@ -108,6 +153,10 @@ func NewConnection(credentials Credentials, server string) *Connection {
 	}
 
 	return &connection
+}
+
+func (c *Connection) Socket() *websocket.Conn {
+	return c.connection
 }
 
 // Start spins a go routine which then continuosly reads the messages
@@ -123,14 +172,12 @@ func (c *Connection) Start() error {
 
 	for {
 		// Connect
-		conn, err := connect(c.server)
+		err := c.Connect()
 		if err != nil && connectCount == 0 {
 			return ErrNetworkConnect
 		} else if err == nil {
-			c.connection = conn
-
 			// Login
-			_, err := c.login()
+			_, err := c.Login()
 			if err != nil {
 				return err
 			}
@@ -226,6 +273,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		idf = ofmsg.GetInstrumentDefinition()
 		instrumentDefinitions[idf.GetMarketId()] = idf
 		instrumentsBySymbol[idf.Symbol] = idf
+	case *OpenfeedGatewayMessage_InstrumentResponse:
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		msg.MessageType = MessageType_MARKET_SNAPSHOT
 		idf = instrumentDefinitions[ofmsg.GetMarketSnapshot().GetMarketId()]
@@ -251,7 +299,11 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 			if c.exchangesMode {
 				ary = c.exchangeHandlers[idf.BarchartExchangeCode]
 			} else {
-				ary = c.symbolHandlers[idf.Symbol]
+				for _, s := range idf.GetSymbols() {
+					if s.GetVendor() == "Barchart" {
+						ary = c.symbolHandlers[s.GetSymbol()]
+					}
+				}
 			}
 		}
 	}
@@ -266,15 +318,16 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	return msg, nil
 }
 
-func connect(server string) (*websocket.Conn, error) {
-	u := url.URL{Scheme: "ws", Host: server, Path: "/ws"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+func (c *Connection) Connect() error {
+	u := url.URL{Scheme: "ws", Host: c.server, Path: "/ws"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 
-	if err != nil {
-		return nil, err
+	if err == nil {
+		c.connection = conn
+		return nil
 	}
 
-	return c, nil
+	return err
 }
 
 func (c *Connection) createExchangeRequest() *OpenfeedGatewayRequest {
@@ -338,7 +391,7 @@ func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 
 // Login sends the login request to the server, and returns
 // true/false with optional error information
-func (c *Connection) login() (bool, error) {
+func (c *Connection) Login() (bool, error) {
 	ofgwlr := OpenfeedGatewayRequest_LoginRequest{
 		LoginRequest: &LoginRequest{
 			Username: c.credentials.Username,
