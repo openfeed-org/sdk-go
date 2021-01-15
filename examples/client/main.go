@@ -35,8 +35,20 @@ func messageHandler(msg openfeed.Message) {
 	}
 }
 
-func main() {
+const usage = `Usage:
+ofclient [flags] symbols|exchanges
 
+Flags:
+-u	Required. Username
+-p	Required. Password
+-s	Optional. Default is openfeed.aws.barchart.com
+-e	Optional. Change to exchanges mode
+-t	Optional. Default is q. Subscription type. Values include:
+		o OHLC
+		q Quotes (includes trades)
+`
+
+func main() {
 	log.SetOutput(os.Stdout)
 
 	username := flag.String("u", "", "The username")
@@ -46,6 +58,10 @@ func main() {
 	subscriptions := flag.String("t", "q", "Quotes.")
 
 	flag.Parse()
+
+	if *username == "" || *password == "" || flag.Arg(0) == "" {
+		log.Fatalln(usage)
+	}
 
 	log.Printf("Using %s/%s connecting to %s\n", *username, *password, *server)
 	conn := openfeed.NewConnection(openfeed.Credentials{
@@ -62,13 +78,14 @@ func main() {
 			s := strings.ToUpper(string(c))
 			switch s {
 			case "O":
-				log.Printf("Adding OHLC Request")
+				// log.Printf("Adding OHLC Request")
 				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
 			case "Q":
-				log.Printf("Adding SUBSCRIPTION Request")
-				//conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+				// log.Printf("Adding SUBSCRIPTION Request")
+				conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
 			default:
 				log.Printf("Unknown subscription %s", s)
+				log.Fatalf(usage)
 			}
 		}
 	}
