@@ -8,6 +8,7 @@ const (
 	MessageType_INSTRUMENT_DEFINITION MessageType = 13
 	MessageType_MARKET_SNAPSHOT       MessageType = 15
 	MessageType_MARKET_UPDATE         MessageType = 16
+	MessageType_OHLC                  MessageType = 99
 )
 
 type Message struct {

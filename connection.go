@@ -47,6 +47,7 @@ type Connection struct {
 	loginResponse     *LoginResponse
 	exchangeHandlers  map[string][]func(Message)
 	heartbeatHandlers []HeartbeatHandler
+	ohlcHandlers      map[string][]func(Message)
 	symbolHandlers    map[string][]func(Message)
 	exchangesMode     bool
 }
@@ -79,6 +80,17 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Messag
 		}
 
 		c.symbolHandlers[s] = append(c.symbolHandlers[s], handler)
+	}
+}
+
+// AddSymbolSubscription subscribes a handler for messages for given slice of symbols
+func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler func(Message)) {
+	for _, s := range symbols {
+		if c.ohlcHandlers[s] == nil {
+			c.ohlcHandlers[s] = make([]func(Message), 0)
+		}
+
+		c.ohlcHandlers[s] = append(c.ohlcHandlers[s], handler)
 	}
 }
 
@@ -149,6 +161,7 @@ func NewConnection(credentials Credentials, server string) *Connection {
 		server:            server,
 		exchangeHandlers:  make(map[string][]func(Message)),
 		heartbeatHandlers: make([]HeartbeatHandler, 0),
+		ohlcHandlers:      make(map[string][]func(Message)),
 		symbolHandlers:    make(map[string][]func(Message)),
 	}
 
@@ -196,6 +209,13 @@ func (c *Connection) Start() error {
 					ba, _ := proto.Marshal(ofsyreq)
 					c.connection.WriteMessage(2, ba)
 				}
+
+				ofsyreq2 := c.createOHLCRequest()
+				if ofsyreq2 != nil {
+					ba, _ := proto.Marshal(ofsyreq2)
+					c.connection.WriteMessage(2, ba)
+				}
+
 			}
 
 			chReader := make(chan struct{})
@@ -280,6 +300,9 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	case *OpenfeedGatewayMessage_MarketUpdate:
 		msg.MessageType = MessageType_MARKET_UPDATE
 		idf = instrumentDefinitions[ofmsg.GetMarketUpdate().GetMarketId()]
+	case *OpenfeedGatewayMessage_Ohlc:
+		msg.MessageType = MessageType_OHLC
+		idf = instrumentDefinitions[ofmsg.GetOhlc().GetMarketId()]
 	case *OpenfeedGatewayMessage_SubscriptionResponse:
 		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
 		if c.exchangesMode {
@@ -301,7 +324,12 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 			} else {
 				for _, s := range idf.GetSymbols() {
 					if s.GetVendor() == "Barchart" {
-						ary = c.symbolHandlers[s.GetSymbol()]
+						switch msg.MessageType {
+						case MessageType_OHLC:
+							ary = c.ohlcHandlers[s.GetSymbol()]
+						default:
+							ary = c.symbolHandlers[s.GetSymbol()]
+						}
 					}
 				}
 			}
@@ -360,6 +388,36 @@ func (c *Connection) createExchangeRequest() *OpenfeedGatewayRequest {
 	return &ofreq
 }
 
+func (c *Connection) createOHLCRequest() *OpenfeedGatewayRequest {
+	if len(c.ohlcHandlers) == 0 {
+		return nil
+	}
+
+	ofreq := OpenfeedGatewayRequest{
+		Data: &OpenfeedGatewayRequest_SubscriptionRequest{
+			SubscriptionRequest: &SubscriptionRequest{
+				Token:    c.loginResponse.GetToken(),
+				Service:  Service_REAL_TIME,
+				Requests: []*SubscriptionRequest_Request{},
+			},
+		},
+	}
+
+	for s := range c.ohlcHandlers {
+		ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests = append(
+			ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests,
+			&SubscriptionRequest_Request{
+				Data: &SubscriptionRequest_Request_Symbol{
+					Symbol: s,
+				},
+				SubscriptionType: []SubscriptionType{SubscriptionType_OHLC, SubscriptionType_OHLC_NON_REGULAR},
+			},
+		)
+	}
+
+	return &ofreq
+}
+
 func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 	if len(c.symbolHandlers) == 0 {
 		return nil
@@ -382,6 +440,7 @@ func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
+				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
 			},
 		)
 	}

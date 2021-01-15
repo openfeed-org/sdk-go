@@ -21,6 +21,8 @@ func messageHandler(msg openfeed.Message) {
 	switch msg.MessageType {
 	case openfeed.MessageType_INSTRUMENT_DEFINITION:
 		fmt.Println("INST DEF", msg.Message)
+	case openfeed.MessageType_OHLC:
+		fmt.Println("OHLC", msg.Message)
 	case openfeed.MessageType_MARKET_SNAPSHOT:
 		fmt.Println("MKT SNAP", msg.Message)
 	case openfeed.MessageType_MARKET_UPDATE:
@@ -37,14 +39,15 @@ func main() {
 
 	log.SetOutput(os.Stdout)
 
-	username := flag.String("username", "", "The username")
-	password := flag.String("password", "", "The password")
-	server := flag.String("server", "openfeed.aws.barchart.com", "The server")
-	exchange := flag.Bool("exchange", false, "Exchanges mode.")
+	username := flag.String("u", "", "The username")
+	password := flag.String("p", "", "The password")
+	server := flag.String("s", "openfeed.aws.barchart.com", "The server")
+	exchange := flag.Bool("e", false, "Exchanges mode.")
+	subscriptions := flag.String("t", "q", "Quotes.")
 
 	flag.Parse()
 
-	fmt.Printf("Using %s/%s connectiong to %s", *username, *password, *server)
+	log.Printf("Using %s/%s connecting to %s\n", *username, *password, *server)
 	conn := openfeed.NewConnection(openfeed.Credentials{
 		Username: *username,
 		Password: *password,
@@ -55,12 +58,24 @@ func main() {
 	if *exchange {
 		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
 	} else {
-		conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+		for _, c := range *subscriptions {
+			s := strings.ToUpper(string(c))
+			switch s {
+			case "O":
+				log.Printf("Adding OHLC Request")
+				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+			case "Q":
+				log.Printf("Adding SUBSCRIPTION Request")
+				//conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+			default:
+				log.Printf("Unknown subscription %s", s)
+			}
+		}
 	}
 
 	conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
 		t := time.Unix(0, msg.GetTransactionTime())
-		fmt.Println("HEARTBEAT", t)
+		log.Printf("HEARTBEAT\t%v", t)
 	})
 
 	err := conn.Start()
