@@ -320,7 +320,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 			log.Println("of: no instrument", ofmsg)
 		} else {
 			if c.exchangesMode {
-				ary = c.exchangeHandlers[idf.BarchartExchangeCode]
+				ary = c.exchangeHandlers[idf.ExchangeCode]
 			} else {
 				for _, s := range idf.GetSymbols() {
 					if s.GetVendor() == "Barchart" {
