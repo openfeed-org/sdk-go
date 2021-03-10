@@ -1,9 +1,8 @@
 # sdk-go
 
-## Golang SDK for Openfeed
+## Golang SDK for Barchart OpenFeed
 
-This SDK encapuslates the openfeed proto objects and faciliates client connections
-to openfeed servers.
+This SDK encapsulates the Barchart OpenFeed proto objects and facilitates client connections to OpenFeed servers for streaming market data.
 
 ### Client Example
 
