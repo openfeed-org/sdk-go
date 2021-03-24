@@ -193,6 +193,8 @@ message InstrumentDefinition {
   sint32 volumeDenominator = 226;
   ///
   sint32 bidOfferQuantityDenominator = 227;
+  ///
+  string primaryListingMarketParticipantId= 228;
 
   // #############################################
   enum InstrumentType {

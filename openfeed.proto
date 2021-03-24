@@ -617,6 +617,7 @@ message Trade {
   sint64 distributionTime = 32;
   /// time in nano seconds since epoch.
   sint64 transactionTime2 = 33;
+  string consolidatedPriceIndicator = 34;
 }
 
 ///  Trade Correction
@@ -648,6 +649,10 @@ message TradeCorrection {
   sint64 distributionTime = 27;
   /// time in nano seconds since epoch.
   sint64 transactionTime2 = 28;
+  // Original Price
+  sint64 originalTradePrice = 29;
+  // Original Quantity
+  sint64 originalTradeQuantity = 30;
 }
 
 //
