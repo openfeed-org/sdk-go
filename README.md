@@ -10,9 +10,9 @@ The client example shows how to use the SDK. The SDK is tasked with connecting t
 
 To request a set of symbols, run:
 
-`go run *.go --username=MyUsername --password=MyPassword --server=openfeed.aws.barchart.com symbol1,symbol2`
+`go run *.go -u MyUsername -p MyPassword symbol1,symbol2`
 
 
-To request a set of exchanges, run:
+To request a set of exchanges, run: (Please note that your username must be specially permissioned for this)
 
-`go run *.go --username=MyUsername --password=MyPassword --server=openfeed.aws.barchart.com --exchange exchange1,exchange2`
+`go run *.go -u MyUsername -p MyPassword -e exchange1,exchange2`
