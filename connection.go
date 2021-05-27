@@ -41,15 +41,16 @@ type Credentials struct {
 // Connection is the main struct that holds the
 // underpinning websocket connection
 type Connection struct {
-	credentials       *Credentials
-	server            string
-	connection        *websocket.Conn
-	loginResponse     *LoginResponse
-	exchangeHandlers  map[string][]func(Message)
-	heartbeatHandlers []HeartbeatHandler
-	ohlcHandlers      map[string][]func(Message)
-	symbolHandlers    map[string][]func(Message)
-	exchangesMode     bool
+	credentials         *Credentials
+	server              string
+	connection          *websocket.Conn
+	loginResponse       *LoginResponse
+	exchangeHandlers    map[string][]func(Message)
+	heartbeatHandlers   []HeartbeatHandler
+	ohlcHandlers        map[string][]func(Message)
+	symbolHandlers      map[string][]func(Message)
+	symbolSubscriptions map[int64]string
+	exchangesMode       bool
 }
 
 type HeartbeatHandler func(*HeartBeat)
@@ -157,12 +158,13 @@ func (c *Connection) CreateInstrumentReferenceRequest(exch string) *OpenfeedGate
 // Connect connects to the server
 func NewConnection(credentials Credentials, server string) *Connection {
 	var connection = Connection{
-		credentials:       &credentials,
-		server:            server,
-		exchangeHandlers:  make(map[string][]func(Message)),
-		heartbeatHandlers: make([]HeartbeatHandler, 0),
-		ohlcHandlers:      make(map[string][]func(Message)),
-		symbolHandlers:    make(map[string][]func(Message)),
+		credentials:         &credentials,
+		server:              server,
+		exchangeHandlers:    make(map[string][]func(Message)),
+		heartbeatHandlers:   make([]HeartbeatHandler, 0),
+		ohlcHandlers:        make(map[string][]func(Message)),
+		symbolHandlers:      make(map[string][]func(Message)),
+		symbolSubscriptions: make(map[int64]string),
 	}
 
 	return &connection
@@ -308,7 +310,10 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		if c.exchangesMode {
 			ary = c.exchangeHandlers[ofmsg.GetSubscriptionResponse().Exchange]
 		} else {
-			ary = c.symbolHandlers[ofmsg.GetSubscriptionResponse().Symbol]
+			rsp := ofmsg.GetSubscriptionResponse()
+			c.symbolSubscriptions[rsp.GetMarketId()] = rsp.GetSymbol()
+			ary = c.symbolHandlers[rsp.GetSymbol()]
+
 		}
 	default:
 		log.Printf("WARN: Unhandled message type. %s. %s", reflect.TypeOf(ofmsg.Data), ty)
@@ -322,14 +327,15 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 			if c.exchangesMode {
 				ary = c.exchangeHandlers[idf.ExchangeCode]
 			} else {
-				for _, s := range idf.GetSymbols() {
-					if s.GetVendor() == "Barchart" {
-						switch msg.MessageType {
-						case MessageType_OHLC:
-							ary = c.ohlcHandlers[s.GetSymbol()]
-						default:
-							ary = c.symbolHandlers[s.GetSymbol()]
-						}
+				sym := c.symbolSubscriptions[idf.MarketId]
+				if sym == "" {
+					log.Printf("No mapped symbol for %d", idf.MarketId)
+				} else {
+					switch msg.MessageType {
+					case MessageType_OHLC:
+						ary = c.ohlcHandlers[sym]
+					default:
+						ary = c.symbolHandlers[sym]
 					}
 				}
 			}
