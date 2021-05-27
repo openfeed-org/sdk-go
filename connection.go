@@ -466,7 +466,7 @@ func (c *Connection) Login() (bool, error) {
 
 	ofreq := OpenfeedGatewayRequest{Data: &ofgwlr}
 
-	ba, err := proto.Marshal(&ofreq)
+	ba, _ := proto.Marshal(&ofreq)
 	c.connection.WriteMessage(2, ba)
 	// Get the login message
 	_, message, err := c.connection.ReadMessage()
@@ -477,7 +477,7 @@ func (c *Connection) Login() (bool, error) {
 	var ofmsg OpenfeedGatewayMessage
 	err = proto.Unmarshal(message, &ofmsg)
 	if err != nil {
-		return false, fmt.Errorf("Unable to unmarshal gateway message. %v", err)
+		return false, fmt.Errorf("unable to unmarshal gateway message. %v", err)
 	}
 
 	c.loginResponse = ofmsg.GetLoginResponse()
