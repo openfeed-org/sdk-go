@@ -240,6 +240,10 @@ func (c *Connection) Start() error {
 
 					} else {
 						c.broadcastMessage(&ofmsg)
+						switch ofmsg.Data.(type) {
+						case *OpenfeedGatewayMessage_LogoutResponse:
+							log.Println("of", ofmsg)
+						}
 					}
 				}
 

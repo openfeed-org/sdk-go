@@ -10,7 +10,6 @@ syntax = "proto3";
 
 package org.openfeed;
 
-option go_package = "openfeed";
 option java_multiple_files = true;
 option java_generate_equals_and_hash = true;
 option optimize_for = SPEED;
@@ -61,6 +60,7 @@ message OpenfeedGatewayMessage {
 enum Result {
   UNKNOWN_RESULT = 0;
   SUCCESS = 1;
+  DUPLICATE_LOGIN = 115;
   INVALID_SYMBOL = 116;
   INVALID_MARKET_ID = 117;
   INVALID_EXCHANGE = 118;
@@ -131,6 +131,11 @@ message InstrumentResponse {
   sint64 correlationId = 1;
   Status status = 2;
   sint32 numberOfDefinitions = 3;
+  //
+  string symbol = 4;
+  sint64 marketId = 5;
+  string exchange = 6;
+  sint32 channelId = 7;
 }
 
 /// Instrument References, returns InstrumentReferenceResponse(s)
