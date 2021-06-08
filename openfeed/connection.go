@@ -186,6 +186,8 @@ func (c *Connection) Start() error {
 	}
 
 	for {
+		keepReconnecting := true
+
 		// Connect
 		err := c.Connect()
 		if err != nil && connectCount == 0 {
@@ -242,7 +244,13 @@ func (c *Connection) Start() error {
 						c.broadcastMessage(&ofmsg)
 						switch ofmsg.Data.(type) {
 						case *OpenfeedGatewayMessage_LogoutResponse:
-							log.Println("of", ofmsg)
+							lr := ofmsg.GetLogoutResponse()
+
+							if lr.GetStatus().GetResult() == Result_DUPLICATE_LOGIN {
+								log.Printf("Disconnected due to duplicate login. Terminating retries.")
+								keepReconnecting = false
+								break
+							}
 						}
 					}
 				}
@@ -259,16 +267,21 @@ func (c *Connection) Start() error {
 			}
 		}
 
-		log.Println("of: caught network event")
+		if keepReconnecting {
+			log.Println("of: caught network event")
 
-		rand.Seed(time.Now().UnixNano())
-		sec := rand.Intn(4) + 1
-		log.Printf("of: reconnecting in %d seconds", sec)
-		time.Sleep(time.Duration(sec) * time.Second)
+			rand.Seed(time.Now().UnixNano())
+			sec := rand.Intn(4) + 1
+			log.Printf("of: reconnecting in %d seconds", sec)
+			time.Sleep(time.Duration(sec) * time.Second)
 
-		connectCount++
+			connectCount++
+		} else {
+			break
+		}
 	}
 
+	return nil
 }
 
 func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {

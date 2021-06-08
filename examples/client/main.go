@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	openfeed "github.com/openfeed-org/sdk-go"
+	"github.com/openfeed-org/sdk-go/openfeed"
 )
 
 func messageHandler(msg openfeed.Message) {

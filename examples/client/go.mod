@@ -1,8 +1,7 @@
 module github.com/openfeed-org/sdk-go/examples/client
 
-replace github.com/openfeed/sdk-go => ../../
+replace github.com/openfeed-org/sdk-go => ../../
 
-require (
-)
+require github.com/openfeed-org/sdk-go v0.1.3
 
 go 1.16
