@@ -95,6 +95,14 @@ func main() {
 		log.Printf("HEARTBEAT\t%v", t)
 	})
 
+	conn.AddMessageSubscription(func(msg *openfeed.Message) {
+		log.Printf("MSG: %v", msg)
+	})
+
 	err := conn.Start()
-	log.Printf("Error on start. %v", err)
+	if err == nil {
+		log.Printf("shutting down")
+	} else {
+		log.Printf("Error on start. %v", err)
+	}
 }

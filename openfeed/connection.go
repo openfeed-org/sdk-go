@@ -45,6 +45,7 @@ type Connection struct {
 	server              string
 	connection          *websocket.Conn
 	loginResponse       *LoginResponse
+	messageHandlers     []MessageHandler
 	exchangeHandlers    map[string][]func(Message)
 	heartbeatHandlers   []HeartbeatHandler
 	ohlcHandlers        map[string][]func(Message)
@@ -71,6 +72,13 @@ func (c *Connection) AddExchangeSubscription(exchanges []string, handler func(Me
 		c.exchangeHandlers[s] = append(c.exchangeHandlers[s], handler)
 	}
 
+}
+
+type MessageHandler func(*Message)
+
+// AddMessageSubscription subscribes a handler to all messages
+func (c *Connection) AddMessageSubscription(handler MessageHandler) {
+	c.messageHandlers = append(c.messageHandlers, handler)
 }
 
 // AddSymbolSubscription subscribes a handler for messages for given slice of symbols
@@ -162,6 +170,7 @@ func NewConnection(credentials Credentials, server string) *Connection {
 		server:              server,
 		exchangeHandlers:    make(map[string][]func(Message)),
 		heartbeatHandlers:   make([]HeartbeatHandler, 0),
+		messageHandlers:     make([]MessageHandler, 0),
 		ohlcHandlers:        make(map[string][]func(Message)),
 		symbolHandlers:      make(map[string][]func(Message)),
 		symbolSubscriptions: make(map[int64]string),
@@ -230,7 +239,9 @@ func (c *Connection) Start() error {
 					c.connection.SetReadDeadline(time.Now().Add(15 * time.Second))
 					_, message, err := c.connection.ReadMessage()
 					if err != nil {
-						log.Printf("of: read error %v", err)
+						if keepReconnecting == true {
+							log.Printf("of: read error %v", err)
+						}
 						c.connection = nil
 						break
 					}
@@ -241,7 +252,11 @@ func (c *Connection) Start() error {
 						log.Printf("of: unable to unmarshal gateway message. %v", err)
 
 					} else {
-						c.broadcastMessage(&ofmsg)
+						m, _ := c.broadcastMessage(&ofmsg)
+						for _, h := range c.messageHandlers {
+							h(&m)
+						}
+
 						switch ofmsg.Data.(type) {
 						case *OpenfeedGatewayMessage_LogoutResponse:
 							lr := ofmsg.GetLogoutResponse()
@@ -291,6 +306,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		msg = Message{}
 	)
 
+	expectInstrument := true
+
 	switch ty := ofmsg.Data.(type) {
 	case *OpenfeedGatewayMessage_HeartBeat:
 		// A bit of a special case
@@ -313,6 +330,9 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		instrumentDefinitions[idf.GetMarketId()] = idf
 		instrumentsBySymbol[idf.Symbol] = idf
 	case *OpenfeedGatewayMessage_InstrumentResponse:
+	case *OpenfeedGatewayMessage_LogoutResponse:
+		msg.MessageType = MessageType_LOGOUT
+		expectInstrument = false
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		msg.MessageType = MessageType_MARKET_SNAPSHOT
 		idf = instrumentDefinitions[ofmsg.GetMarketSnapshot().GetMarketId()]
@@ -334,12 +354,14 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		}
 	default:
 		log.Printf("WARN: Unhandled message type. %s. %s", reflect.TypeOf(ofmsg.Data), ty)
-		return Message{}, fmt.Errorf("of: unhandled message type %s", reflect.TypeOf(ofmsg.Data))
+		return Message{MessageType: MessageType_UNHANDLED, Message: ofmsg.Data}, fmt.Errorf("of: unhandled message type %s", reflect.TypeOf(ofmsg.Data))
 	}
 
 	if ary == nil {
 		if idf == nil {
-			log.Println("of: no instrument", ofmsg)
+			if expectInstrument {
+				log.Println("of: no instrument", ofmsg)
+			}
 		} else {
 			if c.exchangesMode {
 				ary = c.exchangeHandlers[idf.ExchangeCode]
