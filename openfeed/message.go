@@ -16,4 +16,5 @@ const (
 type Message struct {
 	MessageType MessageType
 	Message     isOpenfeedGatewayMessage_Data
+	Message2    *OpenfeedGatewayMessage
 }

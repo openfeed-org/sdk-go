@@ -249,6 +249,8 @@ func (c *Connection) Start() error {
 		if err != nil && connectCount == 0 {
 			return ErrNetworkConnect
 		} else if err == nil {
+			log.Printf("of: connected to %s", c.server)
+
 			// Login
 			_, err := c.Login()
 			if err != nil {
@@ -310,7 +312,7 @@ func (c *Connection) Start() error {
 							lr := ofmsg.GetLogoutResponse()
 
 							if lr.GetStatus().GetResult() == Result_DUPLICATE_LOGIN {
-								log.Printf("Disconnected due to duplicate login. Terminating retries.")
+								log.Printf("of: disconnected due to duplicate login. Terminating retries.")
 								keepReconnecting = false
 								break
 							}
@@ -331,11 +333,9 @@ func (c *Connection) Start() error {
 		}
 
 		if keepReconnecting {
-			log.Println("of: caught network event")
-
 			rand.Seed(time.Now().UnixNano())
 			sec := rand.Intn(4) + 1
-			log.Printf("of: reconnecting in %d seconds", sec)
+			log.Printf("of: disconnected due to netwrok error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
 
 			connectCount++
@@ -430,6 +430,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	}
 
 	msg.Message = ofmsg.Data
+	msg.Message2 = ofmsg
 	if ary != nil {
 		for _, h := range ary {
 			h.NewMessage(&msg)
