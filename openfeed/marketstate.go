@@ -1,7 +1,6 @@
 package openfeed
 
 import (
-	"fmt"
 	"log"
 	"reflect"
 )
@@ -35,6 +34,14 @@ func (q *Quote) applyLast(l *Last) {
 func (q *Quote) applyLow(l *Low) {
 	if l != nil {
 		q.Low = &l.Price
+	}
+}
+
+func (q *Quote) applyTrade(t *Trade) {
+	if t != nil {
+		// if !t.DoesNotUpdateLast {
+		q.Last = &t.Price
+		// }
 	}
 }
 
@@ -79,12 +86,22 @@ func (m *MarketState) ProcessMessage(message *OpenfeedGatewayMessage) {
 			break
 		}
 
-		l := mu.GetLast()
-		if l != nil {
-			q.applyLast(l)
-		} else {
-			fmt.Println(mu, mu.GetLast())
+		switch ty := mu.Data.(type) {
+		case *MarketUpdate_Bbo:
+		case *MarketUpdate_Trades:
+			arr := mu.GetTrades().GetTrades()
+			for _, t := range arr {
+				switch ty := t.Data.(type) {
+				case *Trades_Entry_Trade:
+					q.applyTrade(t.GetTrade())
+				default:
+					log.Printf("warn: unhandled trade type %s", ty)
+				}
+			}
+		default:
+			log.Printf("warn: unhandled MarketUpdate: %s. %s", reflect.TypeOf(mu.Data), ty)
 		}
+
 	default:
 		log.Printf("warn: unhandled message type. %s. %s", reflect.TypeOf(message.Data), ty)
 	}
