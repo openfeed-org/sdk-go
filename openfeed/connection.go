@@ -250,6 +250,7 @@ func (c *Connection) Start() error {
 			return ErrNetworkConnect
 		} else if err == nil {
 			log.Printf("of: connected to %s", c.server)
+			connectCount++
 
 			// Login
 			_, err := c.Login()
@@ -338,7 +339,6 @@ func (c *Connection) Start() error {
 			log.Printf("of: disconnected due to netwrok error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
 
-			connectCount++
 		} else {
 			break
 		}

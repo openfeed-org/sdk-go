@@ -6,11 +6,12 @@ import (
 )
 
 type Quote struct {
-	Symbol string `json:"symbol"`
-	Open   *int64 `json:"open"`
-	High   *int64 `json:"high"`
-	Low    *int64 `json:"low"`
-	Last   *int64 `json:"last"`
+	Symbol    string `json:"symbol"`
+	Open      *int64 `json:"open"`
+	High      *int64 `json:"high"`
+	Low       *int64 `json:"low"`
+	Last      *int64 `json:"last"`
+	TradeTime int64  `json:"tradeTime"`
 }
 
 func (q *Quote) applyOpen(o *Open) {
@@ -39,9 +40,10 @@ func (q *Quote) applyLow(l *Low) {
 
 func (q *Quote) applyTrade(t *Trade) {
 	if t != nil {
-		// if !t.DoesNotUpdateLast {
-		q.Last = &t.Price
-		// }
+		if !t.DoesNotUpdateLast {
+			q.Last = &t.Price
+			q.TradeTime = t.TransactionTime
+		}
 	}
 }
 
@@ -88,6 +90,9 @@ func (m *MarketState) ProcessMessage(message *OpenfeedGatewayMessage) {
 
 		switch ty := mu.Data.(type) {
 		case *MarketUpdate_Bbo:
+		case *MarketUpdate_MarketSummary:
+			// s := mu.GetMarketSummary()
+
 		case *MarketUpdate_Trades:
 			arr := mu.GetTrades().GetTrades()
 			for _, t := range arr {
