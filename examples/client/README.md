@@ -10,3 +10,6 @@ To request a set of symbols, run:
 To request a set of exchanges, run: (Please note that your username must be specially permissioned for this)
 
 `go run *.go -u MyUsername -p MyPassword -e exchange1,exchange2`
+
+To request a list of InstrumentDefinitions on an exchange, run:
+`go run *.go -u MyUsername -p MyPassword -m def exchange`

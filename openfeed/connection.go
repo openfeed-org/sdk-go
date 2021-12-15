@@ -52,6 +52,7 @@ type Connection struct {
 	symbolHandlers      map[string][]func(Message)
 	symbolSubscriptions map[int64]string
 	exchangesMode       bool
+	gatewayRequests     []*OpenfeedGatewayRequest
 }
 
 type HeartbeatHandler func(*HeartBeat)
@@ -174,9 +175,16 @@ func NewConnection(credentials Credentials, server string) *Connection {
 		ohlcHandlers:        make(map[string][]func(Message)),
 		symbolHandlers:      make(map[string][]func(Message)),
 		symbolSubscriptions: make(map[int64]string),
+		gatewayRequests:     make([]*OpenfeedGatewayRequest, 0),
 	}
 
 	return &connection
+}
+
+func (c *Connection) AddRequest(req *OpenfeedGatewayRequest) {
+	if req != nil {
+		c.gatewayRequests = append(c.gatewayRequests, req)
+	}
 }
 
 func (c *Connection) Socket() *websocket.Conn {
@@ -229,6 +237,19 @@ func (c *Connection) Start() error {
 					c.connection.WriteMessage(2, ba)
 				}
 
+			}
+
+			for _, req := range c.gatewayRequests {
+				if req != nil {
+					ir := req.GetInstrumentRequest()
+					if ir != nil {
+						ir.Token = c.loginResponse.GetToken()
+
+						ba, _ := proto.Marshal(req)
+						c.connection.WriteMessage(2, ba)
+						fmt.Println("SENT", req)
+					}
+				}
 			}
 
 			chReader := make(chan struct{})

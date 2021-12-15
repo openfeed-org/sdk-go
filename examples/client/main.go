@@ -12,9 +12,11 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openfeed-org/sdk-go/openfeed"
+	"google.golang.org/protobuf/proto"
 )
 
 func messageHandler(msg openfeed.Message) {
@@ -56,6 +58,7 @@ func main() {
 	server := flag.String("s", "openfeed.aws.barchart.com", "The server")
 	exchange := flag.Bool("e", false, "Exchanges mode.")
 	subscriptions := flag.String("t", "q", "Quotes.")
+	mode := flag.String("m", "quotes", "Mode.")
 
 	flag.Parse()
 
@@ -71,38 +74,110 @@ func main() {
 
 	defer conn.Close()
 
-	if *exchange {
-		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
-	} else {
-		for _, c := range *subscriptions {
-			s := strings.ToUpper(string(c))
-			switch s {
-			case "O":
-				// log.Printf("Adding OHLC Request")
-				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
-			case "Q":
-				// log.Printf("Adding SUBSCRIPTION Request")
-				conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
-			default:
-				log.Printf("Unknown subscription %s", s)
-				log.Fatalf(usage)
+	switch *mode {
+	case "def":
+		err := conn.Connect()
+		if err != nil {
+			log.Printf("error connecting %v", err)
+			return
+		}
+
+		_, err = conn.Login()
+		if err != nil {
+			log.Printf("error logging in %v", err)
+			return
+		}
+
+		req := conn.CreateInstrumentRequestByExchange(flag.Arg(0))
+
+		fmt.Println("ADD", req)
+
+		if req != nil {
+			ba, _ := proto.Marshal(req)
+			conn.Socket().WriteMessage(2, ba)
+		}
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			hbCount := 0
+			for {
+				// There's a server sent heartbeat every 10 seconds
+				conn.Socket().SetReadDeadline(time.Now().Add(15 * time.Second))
+				_, message, err := conn.Socket().ReadMessage()
+				if err != nil {
+					log.Printf("error reading %v", err)
+					return
+				}
+
+				var ofmsg openfeed.OpenfeedGatewayMessage
+				err = proto.Unmarshal(message, &ofmsg)
+				if err != nil {
+					log.Printf("of: unable to unmarshal gateway message. %v", err)
+
+				} else {
+					switch ofmsg.Data.(type) {
+					case *openfeed.OpenfeedGatewayMessage_HeartBeat:
+						hbCount++
+						if hbCount >= 2 {
+							// No more messages
+							log.Printf("received %d heartbeats in a row, no more messages. Exiting.", hbCount)
+							return
+						}
+					case *openfeed.OpenfeedGatewayMessage_InstrumentDefinition:
+						fmt.Println(ofmsg.GetInstrumentDefinition())
+					case *openfeed.OpenfeedGatewayMessage_LogoutResponse:
+						lr := ofmsg.GetLogoutResponse()
+
+						if lr.GetStatus().GetResult() == openfeed.Result_DUPLICATE_LOGIN {
+							log.Printf("Disconnected due to duplicate login. Terminating retries.")
+							return
+						}
+					default:
+						log.Printf("unhandled messge %v", ofmsg)
+					}
+				}
+			}
+		}()
+
+		wg.Wait()
+	case "quotes":
+		if *exchange {
+			conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+		} else {
+			for _, c := range *subscriptions {
+				s := strings.ToUpper(string(c))
+				switch s {
+				case "O":
+					// log.Printf("Adding OHLC Request")
+					conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+				case "Q":
+					// log.Printf("Adding SUBSCRIPTION Request")
+					conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+				default:
+					log.Printf("Unknown subscription %s", s)
+					log.Fatalf(usage)
+				}
 			}
 		}
-	}
 
-	conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
-		t := time.Unix(0, msg.GetTransactionTime())
-		log.Printf("HEARTBEAT\t%v", t)
-	})
+		conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
+			t := time.Unix(0, msg.GetTransactionTime())
+			log.Printf("HEARTBEAT\t%v", t)
+		})
 
-	conn.AddMessageSubscription(func(msg *openfeed.Message) {
-		log.Printf("MSG: %v", msg)
-	})
+		conn.AddMessageSubscription(func(msg *openfeed.Message) {
+			log.Printf("MSG: %v", msg)
+		})
 
-	err := conn.Start()
-	if err == nil {
-		log.Printf("shutting down")
-	} else {
-		log.Printf("Error on start. %v", err)
+		err := conn.Start()
+		if err == nil {
+			log.Printf("shutting down")
+		} else {
+			log.Printf("Error on start. %v", err)
+		}
 	}
 }
