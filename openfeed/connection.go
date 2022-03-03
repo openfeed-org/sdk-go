@@ -47,33 +47,35 @@ type Connection struct {
 	server              string
 	connection          *websocket.Conn
 	loginResponse       *LoginResponse
-	messageHandlers     []MessageHandler
-	exchangeHandlers    map[string][]MessageHandler
-	heartbeatHandlers   []HeartbeatHandler
-	ohlcHandlers        map[string][]MessageHandler
-	symbolHandlers      map[string][]MessageHandler
+	messageHandlers     []*MessageHandler
+	exchangeHandlers    map[string][]*MessageHandler
+	heartbeatHandlers   []*HeartbeatHandler
+	ohlcHandlers        map[string][]*MessageHandler
+	symbolHandlers      map[string][]*MessageHandler
 	symbolSubscriptions map[int64]string
 	exchangesMode       bool
 	connected           bool
 }
 
-type HeartbeatHandler func(*HeartBeat)
+type HeartbeatHandler interface {
+	NewHeartbeat(*HeartBeat)
+}
 
 type MessageHandler interface {
 	NewMessage(*Message)
 }
 
 // AddHeartbeatSubscription subscribes a handler to heartbeat messages
-func (c *Connection) AddHeartbeatSubscription(handler HeartbeatHandler) {
+func (c *Connection) AddHeartbeatSubscription(handler *HeartbeatHandler) {
 	c.heartbeatHandlers = append(c.heartbeatHandlers, handler)
 }
 
 // AddExchangeSubscription subscribes a handler for messages for given slice of exchanges
-func (c *Connection) AddExchangeSubscription(exchanges []string, handler MessageHandler) {
+func (c *Connection) AddExchangeSubscription(exchanges []string, handler *MessageHandler) {
 	c.exchangesMode = true
 	for _, s := range exchanges {
 		if c.exchangeHandlers[s] == nil {
-			c.exchangeHandlers[s] = make([]MessageHandler, 0)
+			c.exchangeHandlers[s] = make([]*MessageHandler, 0)
 		}
 
 		c.exchangeHandlers[s] = append(c.exchangeHandlers[s], handler)
@@ -82,18 +84,18 @@ func (c *Connection) AddExchangeSubscription(exchanges []string, handler Message
 }
 
 // AddMessageSubscription subscribes a handler to all messages
-func (c *Connection) AddMessageSubscription(handler MessageHandler) {
+func (c *Connection) AddMessageSubscription(handler *MessageHandler) {
 	c.messageHandlers = append(c.messageHandlers, handler)
 }
 
 // AddSymbolSubscription subscribes a handler for messages for given slice of symbols
-func (c *Connection) AddSymbolSubscription(symbols []string, handler MessageHandler) {
+func (c *Connection) AddSymbolSubscription(symbols []string, handler *MessageHandler) {
 	c.Lock()
 	defer c.Unlock()
 
 	for _, s := range symbols {
 		if c.symbolHandlers[s] == nil {
-			c.symbolHandlers[s] = make([]MessageHandler, 0)
+			c.symbolHandlers[s] = make([]*MessageHandler, 0)
 			if c.connected {
 				c.subscribe([]string{s})
 			}
@@ -107,11 +109,11 @@ func (c *Connection) AddSymbolSubscription(symbols []string, handler MessageHand
 }
 
 // AddSymbolSubscription subscribes a handler for messages for given slice of symbols
-func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler MessageHandler) {
+func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler *MessageHandler) {
 
 	for _, s := range symbols {
 		if c.ohlcHandlers[s] == nil {
-			c.ohlcHandlers[s] = make([]MessageHandler, 0)
+			c.ohlcHandlers[s] = make([]*MessageHandler, 0)
 		}
 
 		c.ohlcHandlers[s] = append(c.ohlcHandlers[s], handler)
@@ -179,7 +181,7 @@ func (c *Connection) CreateInstrumentReferenceRequest(exch string) *OpenfeedGate
 }
 
 // RemoveSymbolSubscription subscribes a handler for messages for given slice of symbols
-func (c *Connection) RemoveSymbolSubscription(symbols []string, handler MessageHandler) {
+func (c *Connection) RemoveSymbolSubscription(symbols []string, handler *MessageHandler) {
 	for _, s := range symbols {
 		arr := c.symbolHandlers[s]
 
@@ -214,11 +216,11 @@ func NewConnection(credentials Credentials, server string) *Connection {
 	var connection = Connection{
 		credentials:         &credentials,
 		server:              server,
-		exchangeHandlers:    make(map[string][]MessageHandler),
-		heartbeatHandlers:   make([]HeartbeatHandler, 0),
-		messageHandlers:     make([]MessageHandler, 0),
-		ohlcHandlers:        make(map[string][]MessageHandler),
-		symbolHandlers:      make(map[string][]MessageHandler),
+		exchangeHandlers:    make(map[string][]*MessageHandler),
+		heartbeatHandlers:   make([]*HeartbeatHandler, 0),
+		messageHandlers:     make([]*MessageHandler, 0),
+		ohlcHandlers:        make(map[string][]*MessageHandler),
+		symbolHandlers:      make(map[string][]*MessageHandler),
 		symbolSubscriptions: make(map[int64]string),
 		connected:           false,
 	}
@@ -305,7 +307,8 @@ func (c *Connection) Start() error {
 					} else {
 						m, _ := c.broadcastMessage(&ofmsg)
 						for _, h := range c.messageHandlers {
-							h.NewMessage(&m)
+							iface := *h
+							iface.NewMessage(&m)
 						}
 
 						switch ofmsg.Data.(type) {
@@ -349,7 +352,7 @@ func (c *Connection) Start() error {
 
 func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 	var (
-		ary []MessageHandler
+		ary []*MessageHandler
 		idf *InstrumentDefinition
 		msg = Message{}
 	)
@@ -365,7 +368,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		}
 
 		for _, h := range c.heartbeatHandlers {
-			h(hb)
+			hnd := *h
+			hnd.NewHeartbeat(hb)
 		}
 
 		msg.MessageType = MessageType_HEARTBEAT
@@ -433,7 +437,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	msg.Message2 = ofmsg
 	if ary != nil {
 		for _, h := range ary {
-			h.NewMessage(&msg)
+			iface := *h
+			iface.NewMessage(&msg)
 		}
 	}
 

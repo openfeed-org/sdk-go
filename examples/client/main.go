@@ -17,22 +17,50 @@ import (
 	"github.com/openfeed-org/sdk-go/openfeed"
 )
 
-func messageHandler(msg openfeed.Message) {
+type MessageHandlerStats struct {
+	InstrumentDefinition uint64
+	MarketSnapshot       uint64
+	MarketUpdate         uint64
+	OHLC                 uint64
+	SubscriptionResponse uint64
+	Unknown              uint64
+}
+
+type ExampleMessageHandler struct {
+	stats MessageHandlerStats
+}
+
+func (hnd *ExampleMessageHandler) NewHeartbeat(msg *openfeed.HeartBeat) {
+	t := time.Unix(0, msg.GetTransactionTime())
+	log.Printf("HB\t%v", t)
+}
+
+func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 	switch msg.MessageType {
 	case openfeed.MessageType_INSTRUMENT_DEFINITION:
-		fmt.Println("INST DEF", msg.Message)
+		hnd.stats.InstrumentDefinition++
+		// fmt.Println("INST DEF", msg.Message)
 	case openfeed.MessageType_OHLC:
-		fmt.Println("OHLC", msg.Message)
+		hnd.stats.OHLC++
+		// fmt.Println("OHLC", msg.Message)
 	case openfeed.MessageType_MARKET_SNAPSHOT:
-		fmt.Println("MKT SNAP", msg.Message)
+		hnd.stats.MarketSnapshot++
+		// fmt.Println("MKT SNAP", msg.Message)
 	case openfeed.MessageType_MARKET_UPDATE:
-		fmt.Println("MKT UPD", msg.Message)
+		hnd.stats.MarketUpdate++
+		// fmt.Println("MKT UPD", msg.Message)
 	case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
+		hnd.stats.SubscriptionResponse++
 		fmt.Println("SUB RESP", msg.Message)
 
 	default:
+		hnd.stats.Unknown++
 		fmt.Println("Unhandled message type", msg.MessageType)
 	}
+}
+
+func (hnd ExampleMessageHandler) Stats() MessageHandlerStats {
+	return hnd.stats
 }
 
 const usage = `Usage:
@@ -71,18 +99,28 @@ func main() {
 
 	defer conn.Close()
 
+	var messageHandler = ExampleMessageHandler{}
+	go func() {
+		for {
+			log.Printf("Stats: Total: %d, id: %d, ms: %d, mu: %d, ohlc: %d, sr: %d, unk: %d", (messageHandler.Stats().InstrumentDefinition + messageHandler.Stats().MarketSnapshot + messageHandler.Stats().MarketUpdate + messageHandler.Stats().OHLC + messageHandler.Stats().SubscriptionResponse + messageHandler.Stats().Unknown), messageHandler.Stats().InstrumentDefinition, messageHandler.Stats().MarketSnapshot, messageHandler.Stats().MarketUpdate, messageHandler.Stats().OHLC, messageHandler.Stats().SubscriptionResponse, messageHandler.Stats().Unknown)
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	hnd := openfeed.MessageHandler(&messageHandler)
+
 	if *exchange {
-		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 	} else {
 		for _, c := range *subscriptions {
 			s := strings.ToUpper(string(c))
 			switch s {
 			case "O":
 				// log.Printf("Adding OHLC Request")
-				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 			case "Q":
 				// log.Printf("Adding SUBSCRIPTION Request")
-				conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), messageHandler)
+				conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 			default:
 				log.Printf("Unknown subscription %s", s)
 				log.Fatalf(usage)
@@ -90,14 +128,14 @@ func main() {
 		}
 	}
 
-	conn.AddHeartbeatSubscription(func(msg *openfeed.HeartBeat) {
-		t := time.Unix(0, msg.GetTransactionTime())
-		log.Printf("HEARTBEAT\t%v", t)
-	})
+	hb := openfeed.HeartbeatHandler(&messageHandler)
+	conn.AddHeartbeatSubscription(&hb)
+	// func(msg *openfeed.HeartBeat) {
+	// })
 
-	conn.AddMessageSubscription(func(msg *openfeed.Message) {
-		log.Printf("MSG: %v", msg)
-	})
+	// conn.AddMessageSubscription(func(msg *openfeed.Message) {
+	// 	log.Printf("MSG: %v", msg)
+	// })
 
 	err := conn.Start()
 	if err == nil {
