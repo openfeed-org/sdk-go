@@ -123,7 +123,9 @@ func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler *Messag
 // Close closes the connection
 func (c *Connection) Close() {
 	if c.connection != nil {
+		log.Printf("Closing web socket")
 		c.connection.Close()
+		c.connection = nil
 	}
 }
 
@@ -545,7 +547,7 @@ func (c *Connection) unsubscribe(arr []string) {
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
-				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
 			},
 		)
 	}
@@ -572,7 +574,7 @@ func (c *Connection) generateSymbolRequest(arr []string) *OpenfeedGatewayRequest
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
-				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
 			},
 		)
 	}
