@@ -327,6 +327,7 @@ func (c *Connection) Start() error {
 				}
 				c.connected = false
 				close(chReader)
+				c.Close()
 			}()
 
 		L2:
@@ -341,7 +342,7 @@ func (c *Connection) Start() error {
 		if keepReconnecting {
 			rand.Seed(time.Now().UnixNano())
 			sec := rand.Intn(4) + 1
-			log.Printf("of: disconnected due to netwrok error, reconnecting in %d seconds", sec)
+			log.Printf("of: disconnected due to network error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
 
 		} else {
