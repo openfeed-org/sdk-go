@@ -251,6 +251,7 @@ func (c *Connection) Start() error {
 		// Connect
 		err := c.Connect()
 		if err != nil && connectCount == 0 {
+			log.Printf("of: connection error: %v", err)
 			return ErrNetworkConnect
 		} else if err == nil {
 			log.Printf("of: connected to %s", c.server)
@@ -266,6 +267,7 @@ func (c *Connection) Start() error {
 				// Request Exchanges
 				ofexreq := c.createExchangeRequest()
 				if ofexreq != nil {
+					log.Printf("Exch Sub: %v", ofexreq)
 					ba, _ := proto.Marshal(ofexreq)
 					c.connection.WriteMessage(2, ba)
 				}
@@ -274,6 +276,7 @@ func (c *Connection) Start() error {
 				ofsyreq := c.createSymbolRequest()
 				if ofsyreq != nil {
 					ba, _ := proto.Marshal(ofsyreq)
+					log.Printf("Sym Sub: %v", ofsyreq)
 					c.connection.WriteMessage(2, ba)
 				}
 
@@ -295,7 +298,7 @@ func (c *Connection) Start() error {
 					_, message, err := c.connection.ReadMessage()
 					if err != nil {
 						if keepReconnecting == true {
-							log.Printf("of: read error %v", err)
+							log.Printf("of: read error: %v", err)
 						}
 						c.connection = nil
 						break
@@ -325,15 +328,18 @@ func (c *Connection) Start() error {
 						}
 					}
 				}
+
+				log.Printf("of: Exited Read Loop")
 				c.connected = false
-				close(chReader)
 				c.Close()
+				close(chReader)
 			}()
 
 		L2:
 			for {
 				select {
 				case <-chReader:
+					log.Printf("Exit wait for read routine")
 					break L2
 				}
 			}

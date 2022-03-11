@@ -27,28 +27,37 @@ type MessageHandlerStats struct {
 }
 
 type ExampleMessageHandler struct {
-	stats MessageHandlerStats
+	li, ls, lu, lo bool
+	stats          MessageHandlerStats
 }
 
 func (hnd *ExampleMessageHandler) NewHeartbeat(msg *openfeed.HeartBeat) {
 	t := time.Unix(0, msg.GetTransactionTime())
-	log.Printf("HB\t%v", t)
+	log.Printf("HB\t%v msg: %v", t, msg)
 }
 
 func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 	switch msg.MessageType {
 	case openfeed.MessageType_INSTRUMENT_DEFINITION:
 		hnd.stats.InstrumentDefinition++
-		// fmt.Println("INST DEF", msg.Message)
+		if hnd.li {
+			fmt.Println("INST DEF", msg.Message)
+		}
 	case openfeed.MessageType_OHLC:
 		hnd.stats.OHLC++
-		// fmt.Println("OHLC", msg.Message)
+		if hnd.lo {
+			fmt.Println("OHLC", msg.Message)
+		}
 	case openfeed.MessageType_MARKET_SNAPSHOT:
 		hnd.stats.MarketSnapshot++
-		// fmt.Println("MKT SNAP", msg.Message)
+		if hnd.ls {
+			fmt.Println("MKT SNAP", msg.Message)
+		}
 	case openfeed.MessageType_MARKET_UPDATE:
 		hnd.stats.MarketUpdate++
-		// fmt.Println("MKT UPD", msg.Message)
+		if hnd.lu {
+			fmt.Println("MKT UPD", msg.Message)
+		}
 	case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
 		hnd.stats.SubscriptionResponse++
 		fmt.Println("SUB RESP", msg.Message)
@@ -74,6 +83,10 @@ Flags:
 -t	Optional. Default is q. Subscription type. Values include:
 		o OHLC
 		q Quotes (includes trades)
+-li  Optional. Log Instruments
+-ls  Optional. Log Snapshots
+-lu  Optional. Log Market Updates
+-lo  Optional. Log OHLC
 `
 
 func main() {
@@ -82,6 +95,10 @@ func main() {
 	username := flag.String("u", "", "The username")
 	password := flag.String("p", "", "The password")
 	server := flag.String("s", "openfeed.aws.barchart.com", "The server")
+	li := flag.Bool("li", false, "Log Instruments")
+	ls := flag.Bool("ls", false, "Log Snapshots")
+	lu := flag.Bool("lu", false, "Log Market Updates")
+	lo := flag.Bool("lo", false, "Log OHLC")
 	exchange := flag.Bool("e", false, "Exchanges mode.")
 	subscriptions := flag.String("t", "q", "Quotes.")
 
@@ -100,11 +117,17 @@ func main() {
 	defer conn.Close()
 
 	var messageHandler = ExampleMessageHandler{}
+	messageHandler.li = *li
+	messageHandler.ls = *ls
+	messageHandler.lu = *lu
+	messageHandler.lo = *lo
+
 	go func() {
 		for {
 			log.Printf("Stats: Total: %d, id: %d, ms: %d, mu: %d, ohlc: %d, sr: %d, unk: %d", (messageHandler.Stats().InstrumentDefinition + messageHandler.Stats().MarketSnapshot + messageHandler.Stats().MarketUpdate + messageHandler.Stats().OHLC + messageHandler.Stats().SubscriptionResponse + messageHandler.Stats().Unknown), messageHandler.Stats().InstrumentDefinition, messageHandler.Stats().MarketSnapshot, messageHandler.Stats().MarketUpdate, messageHandler.Stats().OHLC, messageHandler.Stats().SubscriptionResponse, messageHandler.Stats().Unknown)
 			time.Sleep(5 * time.Second)
 		}
+		log.Printf("Message Count Routine exiting...")
 	}()
 
 	hnd := openfeed.MessageHandler(&messageHandler)
