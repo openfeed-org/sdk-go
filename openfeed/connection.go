@@ -300,7 +300,7 @@ func (c *Connection) Start() error {
 						if keepReconnecting == true {
 							log.Printf("of: read error: %v", err)
 						}
-						c.connection = nil
+						c.Close()
 						break
 					}
 
@@ -330,8 +330,8 @@ func (c *Connection) Start() error {
 				}
 
 				log.Printf("of: Exited Read Loop")
-				c.connected = false
 				c.Close()
+				c.connected = false
 				close(chReader)
 			}()
 
