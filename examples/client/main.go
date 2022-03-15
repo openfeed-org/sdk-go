@@ -164,6 +164,6 @@ func main() {
 	if err == nil {
 		log.Printf("shutting down")
 	} else {
-		log.Printf("Error on start. %v", err)
+		log.Printf("Error on start. error: %v", err)
 	}
 }

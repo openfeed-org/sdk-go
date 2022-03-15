@@ -250,16 +250,16 @@ func (c *Connection) Start() error {
 
 		// Connect
 		err := c.Connect()
-		if err != nil && connectCount == 0 {
+		if err != nil {
 			log.Printf("of: connection error: %v", err)
-			return ErrNetworkConnect
 		} else if err == nil {
-			log.Printf("of: connected to %s", c.server)
 			connectCount++
+			log.Printf("of: connected to %s count: %d", c.server, connectCount)
 
 			// Login
 			_, err := c.Login()
 			if err != nil {
+				log.Printf("of: Login. error: %v", err)
 				return err
 			}
 
@@ -269,7 +269,11 @@ func (c *Connection) Start() error {
 				if ofexreq != nil {
 					log.Printf("Exch Sub: %v", ofexreq)
 					ba, _ := proto.Marshal(ofexreq)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Exchange sub. error: %v", err)
+						continue
+					}
 				}
 			} else {
 				// Request Symbols
@@ -277,13 +281,21 @@ func (c *Connection) Start() error {
 				if ofsyreq != nil {
 					ba, _ := proto.Marshal(ofsyreq)
 					log.Printf("Sym Sub: %v", ofsyreq)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Exchange sub. error: %v", err)
+						continue
+					}
 				}
 
 				ofsyreq2 := c.createOHLCRequest()
 				if ofsyreq2 != nil {
 					ba, _ := proto.Marshal(ofsyreq2)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Exchange sub. error: %v", err)
+						continue
+					}
 				}
 
 			}
@@ -300,7 +312,7 @@ func (c *Connection) Start() error {
 						if keepReconnecting == true {
 							log.Printf("of: read error: %v", err)
 						}
-						c.Close()
+						// force reconnection
 						break
 					}
 
@@ -308,7 +320,6 @@ func (c *Connection) Start() error {
 					err = proto.Unmarshal(message, &ofmsg)
 					if err != nil {
 						log.Printf("of: unable to unmarshal gateway message. %v", err)
-
 					} else {
 						m, _ := c.broadcastMessage(&ofmsg)
 						for _, h := range c.messageHandlers {
@@ -327,7 +338,7 @@ func (c *Connection) Start() error {
 							}
 						}
 					}
-				}
+				} // end read loop
 
 				log.Printf("of: Exited Read Loop")
 				c.Close()
@@ -343,6 +354,7 @@ func (c *Connection) Start() error {
 					break L2
 				}
 			}
+
 		}
 
 		if keepReconnecting {
@@ -350,11 +362,10 @@ func (c *Connection) Start() error {
 			sec := rand.Intn(4) + 1
 			log.Printf("of: disconnected due to network error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
-
 		} else {
 			break
 		}
-	}
+	} // reconnect loop
 
 	return nil
 }
