@@ -75,10 +75,10 @@ func (hnd ExampleMessageHandler) Stats() MessageHandlerStats {
 	return hnd.stats
 }
 
-type AllMessages struct {
+type AllMessagesHandler struct {
 }
 
-func (hnd *AllMessages) NewMessage(msg *openfeed.Message) {
+func (hnd *AllMessagesHandler) NewMessage(msg *openfeed.Message) {
 	log.Printf("MSG\t%v", msg)
 }
 
@@ -124,9 +124,6 @@ func main() {
 		Password: *password,
 	}, *server)
 
-	// TODO Needed?
-	// defer conn.Close()
-
 	var messageHandler = ExampleMessageHandler{}
 	messageHandler.li = *li
 	messageHandler.ls = *ls
@@ -145,16 +142,17 @@ func main() {
 	hnd := openfeed.MessageHandler(&messageHandler)
 
 	if *exchange {
+		log.Printf("Adding Exchange Request")
 		conn.AddExchangeSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 	} else {
 		for _, c := range *subscriptions {
 			s := strings.ToUpper(string(c))
 			switch s {
 			case "O":
-				// log.Printf("Adding OHLC Request")
+				log.Printf("Adding OHLC Request")
 				conn.AddSymbolOHLCSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 			case "Q":
-				// log.Printf("Adding SUBSCRIPTION Request")
+				log.Printf("Adding SUBSCRIPTION Request")
 				conn.AddSymbolSubscription(strings.Split(flag.Arg(0), ","), &hnd)
 			default:
 				log.Printf("Unknown subscription %s", s)
@@ -168,7 +166,7 @@ func main() {
 	conn.AddHeartbeatSubscription(&hb)
 
 	// Add a messge handler for all messages
-	allHnd := AllMessages{}
+	allHnd := AllMessagesHandler{}
 	h := openfeed.MessageHandler(&allHnd)
 	conn.AddMessageSubscription(&h)
 
