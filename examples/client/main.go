@@ -18,6 +18,7 @@ import (
 )
 
 type MessageHandlerStats struct {
+	HeartBeat            uint64
 	InstrumentDefinition uint64
 	MarketSnapshot       uint64
 	MarketUpdate         uint64
@@ -38,6 +39,9 @@ func (hnd *ExampleMessageHandler) NewHeartbeat(msg *openfeed.HeartBeat) {
 
 func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 	switch msg.MessageType {
+	case openfeed.MessageType_HEARTBEAT:
+		hnd.stats.HeartBeat++
+		// Logged in HB handler
 	case openfeed.MessageType_INSTRUMENT_DEFINITION:
 		hnd.stats.InstrumentDefinition++
 		if hnd.li {
@@ -61,7 +65,6 @@ func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 	case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
 		hnd.stats.SubscriptionResponse++
 		fmt.Println("SUB RESP", msg.Message)
-
 	default:
 		hnd.stats.Unknown++
 		fmt.Println("Unhandled message type", msg.MessageType)
@@ -70,6 +73,13 @@ func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 
 func (hnd ExampleMessageHandler) Stats() MessageHandlerStats {
 	return hnd.stats
+}
+
+type AllMessages struct {
+}
+
+func (hnd *AllMessages) NewMessage(msg *openfeed.Message) {
+	log.Printf("MSG\t%v", msg)
 }
 
 const usage = `Usage:
@@ -114,7 +124,8 @@ func main() {
 		Password: *password,
 	}, *server)
 
-	defer conn.Close()
+	// TODO Needed?
+	// defer conn.Close()
 
 	var messageHandler = ExampleMessageHandler{}
 	messageHandler.li = *li
@@ -124,7 +135,8 @@ func main() {
 
 	go func() {
 		for {
-			log.Printf("Stats: Total: %d, id: %d, ms: %d, mu: %d, ohlc: %d, sr: %d, unk: %d", (messageHandler.Stats().InstrumentDefinition + messageHandler.Stats().MarketSnapshot + messageHandler.Stats().MarketUpdate + messageHandler.Stats().OHLC + messageHandler.Stats().SubscriptionResponse + messageHandler.Stats().Unknown), messageHandler.Stats().InstrumentDefinition, messageHandler.Stats().MarketSnapshot, messageHandler.Stats().MarketUpdate, messageHandler.Stats().OHLC, messageHandler.Stats().SubscriptionResponse, messageHandler.Stats().Unknown)
+			log.Printf("Stats: Total: %d, hb: %d id: %d, ms: %d, mu: %d, ohlc: %d, sr: %d, unk: %d", (messageHandler.Stats().HeartBeat + messageHandler.Stats().InstrumentDefinition + messageHandler.Stats().MarketSnapshot + messageHandler.Stats().MarketUpdate + messageHandler.Stats().OHLC + messageHandler.Stats().SubscriptionResponse + messageHandler.Stats().Unknown),
+				messageHandler.Stats().HeartBeat, messageHandler.Stats().InstrumentDefinition, messageHandler.Stats().MarketSnapshot, messageHandler.Stats().MarketUpdate, messageHandler.Stats().OHLC, messageHandler.Stats().SubscriptionResponse, messageHandler.Stats().Unknown)
 			time.Sleep(5 * time.Second)
 		}
 		log.Printf("Message Count Routine exiting...")
@@ -151,14 +163,14 @@ func main() {
 		}
 	}
 
+	// Call on heartbeats
 	hb := openfeed.HeartbeatHandler(&messageHandler)
 	conn.AddHeartbeatSubscription(&hb)
-	// func(msg *openfeed.HeartBeat) {
-	// })
 
-	// conn.AddMessageSubscription(func(msg *openfeed.Message) {
-	// 	log.Printf("MSG: %v", msg)
-	// })
+	// Add a messge handler for all messages
+	allHnd := AllMessages{}
+	h := openfeed.MessageHandler(&allHnd)
+	conn.AddMessageSubscription(&h)
 
 	err := conn.Start()
 	if err == nil {

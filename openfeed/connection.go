@@ -283,7 +283,7 @@ func (c *Connection) Start() error {
 					log.Printf("Sym Sub: %v", ofsyreq)
 					err := c.connection.WriteMessage(2, ba)
 					if err != nil {
-						log.Printf("of: Exchange sub. error: %v", err)
+						log.Printf("of: Symbol sub. error: %v", err)
 						continue
 					}
 				}
@@ -293,7 +293,7 @@ func (c *Connection) Start() error {
 					ba, _ := proto.Marshal(ofsyreq2)
 					err := c.connection.WriteMessage(2, ba)
 					if err != nil {
-						log.Printf("of: Exchange sub. error: %v", err)
+						log.Printf("of: OHLC sub. error: %v", err)
 						continue
 					}
 				}
@@ -319,9 +319,11 @@ func (c *Connection) Start() error {
 					var ofmsg OpenfeedGatewayMessage
 					err = proto.Unmarshal(message, &ofmsg)
 					if err != nil {
-						log.Printf("of: unable to unmarshal gateway message. %v", err)
+						log.Printf("of: error, unable to unmarshal gateway message. %v", err)
 					} else {
+
 						m, _ := c.broadcastMessage(&ofmsg)
+						// Callback all message handlers
 						for _, h := range c.messageHandlers {
 							iface := *h
 							iface.NewMessage(&m)
@@ -403,6 +405,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		instrumentsBySymbol[idf.Symbol] = idf
 	case *OpenfeedGatewayMessage_InstrumentResponse:
 	case *OpenfeedGatewayMessage_LogoutResponse:
+		log.Printf("of:Logout %v", ofmsg.GetLogoutResponse())
 		msg.MessageType = MessageType_LOGOUT
 		expectInstrument = false
 	case *OpenfeedGatewayMessage_MarketSnapshot:
@@ -417,7 +420,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	case *OpenfeedGatewayMessage_SubscriptionResponse:
 		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
 		if c.exchangesMode {
-			ary = c.exchangeHandlers[ofmsg.GetSubscriptionResponse().Exchange]
+			rsp := ofmsg.GetSubscriptionResponse()
+			ary = c.exchangeHandlers[rsp.Exchange]
 		} else {
 			rsp := ofmsg.GetSubscriptionResponse()
 			c.symbolSubscriptions[rsp.GetMarketId()] = rsp.GetSymbol()
