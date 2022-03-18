@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/url"
 	"reflect"
+	sync "sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -41,33 +42,41 @@ type Credentials struct {
 // Connection is the main struct that holds the
 // underpinning websocket connection
 type Connection struct {
+	sync.RWMutex
 	credentials         *Credentials
 	server              string
 	connection          *websocket.Conn
 	loginResponse       *LoginResponse
-	messageHandlers     []MessageHandler
-	exchangeHandlers    map[string][]func(Message)
-	heartbeatHandlers   []HeartbeatHandler
-	ohlcHandlers        map[string][]func(Message)
-	symbolHandlers      map[string][]func(Message)
+	messageHandlers     []*MessageHandler
+	exchangeHandlers    map[string][]*MessageHandler
+	heartbeatHandlers   []*HeartbeatHandler
+	ohlcHandlers        map[string][]*MessageHandler
+	symbolHandlers      map[string][]*MessageHandler
 	symbolSubscriptions map[int64]string
 	exchangesMode       bool
 	gatewayRequests     []*OpenfeedGatewayRequest
+	connected           bool
 }
 
-type HeartbeatHandler func(*HeartBeat)
+type HeartbeatHandler interface {
+	NewHeartbeat(*HeartBeat)
+}
+
+type MessageHandler interface {
+	NewMessage(*Message)
+}
 
 // AddHeartbeatSubscription subscribes a handler to heartbeat messages
-func (c *Connection) AddHeartbeatSubscription(handler HeartbeatHandler) {
+func (c *Connection) AddHeartbeatSubscription(handler *HeartbeatHandler) {
 	c.heartbeatHandlers = append(c.heartbeatHandlers, handler)
 }
 
 // AddExchangeSubscription subscribes a handler for messages for given slice of exchanges
-func (c *Connection) AddExchangeSubscription(exchanges []string, handler func(Message)) {
+func (c *Connection) AddExchangeSubscription(exchanges []string, handler *MessageHandler) {
 	c.exchangesMode = true
 	for _, s := range exchanges {
 		if c.exchangeHandlers[s] == nil {
-			c.exchangeHandlers[s] = make([]func(Message), 0)
+			c.exchangeHandlers[s] = make([]*MessageHandler, 0)
 		}
 
 		c.exchangeHandlers[s] = append(c.exchangeHandlers[s], handler)
@@ -75,29 +84,37 @@ func (c *Connection) AddExchangeSubscription(exchanges []string, handler func(Me
 
 }
 
-type MessageHandler func(*Message)
-
 // AddMessageSubscription subscribes a handler to all messages
-func (c *Connection) AddMessageSubscription(handler MessageHandler) {
+func (c *Connection) AddMessageSubscription(handler *MessageHandler) {
 	c.messageHandlers = append(c.messageHandlers, handler)
 }
 
 // AddSymbolSubscription subscribes a handler for messages for given slice of symbols
-func (c *Connection) AddSymbolSubscription(symbols []string, handler func(Message)) {
+func (c *Connection) AddSymbolSubscription(symbols []string, handler *MessageHandler) {
+	c.Lock()
+	defer c.Unlock()
+
 	for _, s := range symbols {
 		if c.symbolHandlers[s] == nil {
-			c.symbolHandlers[s] = make([]func(Message), 0)
+			c.symbolHandlers[s] = make([]*MessageHandler, 0)
+			if c.connected {
+				c.subscribe([]string{s})
+			}
 		}
 
 		c.symbolHandlers[s] = append(c.symbolHandlers[s], handler)
+
+		fmt.Println("ADD", s, &handler)
+
 	}
 }
 
 // AddSymbolSubscription subscribes a handler for messages for given slice of symbols
-func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler func(Message)) {
+func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler *MessageHandler) {
+
 	for _, s := range symbols {
 		if c.ohlcHandlers[s] == nil {
-			c.ohlcHandlers[s] = make([]func(Message), 0)
+			c.ohlcHandlers[s] = make([]*MessageHandler, 0)
 		}
 
 		c.ohlcHandlers[s] = append(c.ohlcHandlers[s], handler)
@@ -107,7 +124,9 @@ func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler func(Me
 // Close closes the connection
 func (c *Connection) Close() {
 	if c.connection != nil {
+		log.Printf("Closing web socket")
 		c.connection.Close()
+		c.connection = nil
 	}
 }
 
@@ -164,18 +183,50 @@ func (c *Connection) CreateInstrumentReferenceRequest(exch string) *OpenfeedGate
 	return &ofreq
 }
 
+// RemoveSymbolSubscription subscribes a handler for messages for given slice of symbols
+func (c *Connection) RemoveSymbolSubscription(symbols []string, handler *MessageHandler) {
+	for _, s := range symbols {
+		arr := c.symbolHandlers[s]
+
+		if arr != nil {
+			idx := -1
+			for i, h := range arr {
+				if h == handler {
+					idx = i
+					break
+				}
+			}
+
+			if idx == -1 {
+				log.Printf("warn - listener not found while trying to remove from %s", s)
+			} else {
+				if len(arr) == 1 {
+					c.unsubscribe([]string{s})
+					fmt.Printf("UNSUBSCRIBE %s\n", s)
+					delete(c.symbolHandlers, s)
+				} else {
+					arr[idx] = arr[len(arr)-1] // Move last item to idx
+					arr = arr[:len(arr)-1]     // Truncate
+					c.symbolHandlers[s] = arr
+				}
+			}
+		}
+	}
+}
+
 // Connect connects to the server
 func NewConnection(credentials Credentials, server string) *Connection {
 	var connection = Connection{
 		credentials:         &credentials,
 		server:              server,
-		exchangeHandlers:    make(map[string][]func(Message)),
-		heartbeatHandlers:   make([]HeartbeatHandler, 0),
-		messageHandlers:     make([]MessageHandler, 0),
-		ohlcHandlers:        make(map[string][]func(Message)),
-		symbolHandlers:      make(map[string][]func(Message)),
+		exchangeHandlers:    make(map[string][]*MessageHandler),
+		heartbeatHandlers:   make([]*HeartbeatHandler, 0),
+		messageHandlers:     make([]*MessageHandler, 0),
+		ohlcHandlers:        make(map[string][]*MessageHandler),
+		symbolHandlers:      make(map[string][]*MessageHandler),
 		symbolSubscriptions: make(map[int64]string),
 		gatewayRequests:     make([]*OpenfeedGatewayRequest, 0),
+		connected:           false,
 	}
 
 	return &connection
@@ -207,12 +258,16 @@ func (c *Connection) Start() error {
 
 		// Connect
 		err := c.Connect()
-		if err != nil && connectCount == 0 {
-			return ErrNetworkConnect
+		if err != nil {
+			log.Printf("of: connection error: %v", err)
 		} else if err == nil {
+			connectCount++
+			log.Printf("of: connected to %s count: %d", c.server, connectCount)
+
 			// Login
 			_, err := c.Login()
 			if err != nil {
+				log.Printf("of: Login. error: %v", err)
 				return err
 			}
 
@@ -220,21 +275,35 @@ func (c *Connection) Start() error {
 				// Request Exchanges
 				ofexreq := c.createExchangeRequest()
 				if ofexreq != nil {
+					log.Printf("Exch Sub: %v", ofexreq)
 					ba, _ := proto.Marshal(ofexreq)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Exchange sub. error: %v", err)
+						continue
+					}
 				}
 			} else {
 				// Request Symbols
 				ofsyreq := c.createSymbolRequest()
 				if ofsyreq != nil {
 					ba, _ := proto.Marshal(ofsyreq)
-					c.connection.WriteMessage(2, ba)
+					log.Printf("Sym Sub: %v", ofsyreq)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Symbol sub. error: %v", err)
+						continue
+					}
 				}
 
 				ofsyreq2 := c.createOHLCRequest()
 				if ofsyreq2 != nil {
 					ba, _ := proto.Marshal(ofsyreq2)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: OHLC sub. error: %v", err)
+						continue
+					}
 				}
 
 			}
@@ -258,24 +327,27 @@ func (c *Connection) Start() error {
 				for {
 					// There's a server sent heartbeat every 10 seconds
 					c.connection.SetReadDeadline(time.Now().Add(15 * time.Second))
+					c.connected = true
 					_, message, err := c.connection.ReadMessage()
 					if err != nil {
 						if keepReconnecting == true {
-							log.Printf("of: read error %v", err)
+							log.Printf("of: read error: %v", err)
 						}
-						c.connection = nil
+						// force reconnection
 						break
 					}
 
 					var ofmsg OpenfeedGatewayMessage
 					err = proto.Unmarshal(message, &ofmsg)
 					if err != nil {
-						log.Printf("of: unable to unmarshal gateway message. %v", err)
-
+						log.Printf("of: error, unable to unmarshal gateway message. %v", err)
 					} else {
+
 						m, _ := c.broadcastMessage(&ofmsg)
+						// Callback all message handlers
 						for _, h := range c.messageHandlers {
-							h(&m)
+							iface := *h
+							iface.NewMessage(&m)
 						}
 
 						switch ofmsg.Data.(type) {
@@ -283,14 +355,17 @@ func (c *Connection) Start() error {
 							lr := ofmsg.GetLogoutResponse()
 
 							if lr.GetStatus().GetResult() == Result_DUPLICATE_LOGIN {
-								log.Printf("Disconnected due to duplicate login. Terminating retries.")
+								log.Printf("of: disconnected due to duplicate login. Terminating retries.")
 								keepReconnecting = false
 								break
 							}
 						}
 					}
-				}
+				} // end read loop
 
+				log.Printf("of: Exited Read Loop")
+				c.Close()
+				c.connected = false
 				close(chReader)
 			}()
 
@@ -298,31 +373,29 @@ func (c *Connection) Start() error {
 			for {
 				select {
 				case <-chReader:
+					log.Printf("Exit wait for read routine")
 					break L2
 				}
 			}
+
 		}
 
 		if keepReconnecting {
-			log.Println("of: caught network event")
-
 			rand.Seed(time.Now().UnixNano())
 			sec := rand.Intn(4) + 1
-			log.Printf("of: reconnecting in %d seconds", sec)
+			log.Printf("of: disconnected due to network error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
-
-			connectCount++
 		} else {
 			break
 		}
-	}
+	} // reconnect loop
 
 	return nil
 }
 
 func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, error) {
 	var (
-		ary []func(Message)
+		ary []*MessageHandler
 		idf *InstrumentDefinition
 		msg = Message{}
 	)
@@ -338,7 +411,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		}
 
 		for _, h := range c.heartbeatHandlers {
-			h(hb)
+			hnd := *h
+			hnd.NewHeartbeat(hb)
 		}
 
 		msg.MessageType = MessageType_HEARTBEAT
@@ -351,9 +425,12 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		instrumentDefinitions[idf.GetMarketId()] = idf
 		instrumentsBySymbol[idf.Symbol] = idf
 	case *OpenfeedGatewayMessage_InstrumentResponse:
-	case *OpenfeedGatewayMessage_LogoutResponse:
-		msg.MessageType = MessageType_LOGOUT
+		log.Printf("of: Instrument Response %v", ofmsg.GetInstrumentResponse())
+		msg.MessageType = MessageType_INSTRUMENT_RESPONSE
 		expectInstrument = false
+	case *OpenfeedGatewayMessage_LogoutResponse:
+		log.Printf("of:Logout %v", ofmsg.GetLogoutResponse())
+		msg.MessageType = MessageType_LOGOUT
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		msg.MessageType = MessageType_MARKET_SNAPSHOT
 		idf = instrumentDefinitions[ofmsg.GetMarketSnapshot().GetMarketId()]
@@ -366,7 +443,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	case *OpenfeedGatewayMessage_SubscriptionResponse:
 		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
 		if c.exchangesMode {
-			ary = c.exchangeHandlers[ofmsg.GetSubscriptionResponse().Exchange]
+			rsp := ofmsg.GetSubscriptionResponse()
+			ary = c.exchangeHandlers[rsp.Exchange]
 		} else {
 			rsp := ofmsg.GetSubscriptionResponse()
 			c.symbolSubscriptions[rsp.GetMarketId()] = rsp.GetSymbol()
@@ -403,9 +481,11 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	}
 
 	msg.Message = ofmsg.Data
+	msg.Message2 = ofmsg
 	if ary != nil {
 		for _, h := range ary {
-			h(msg)
+			iface := *h
+			iface.NewMessage(&msg)
 		}
 	}
 
@@ -484,11 +564,44 @@ func (c *Connection) createOHLCRequest() *OpenfeedGatewayRequest {
 	return &ofreq
 }
 
-func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
-	if len(c.symbolHandlers) == 0 {
-		return nil
+func (c *Connection) subscribe(arr []string) {
+	ofreq := c.generateSymbolRequest(arr)
+	if ofreq != nil {
+		ba, _ := proto.Marshal(ofreq)
+		c.connection.WriteMessage(2, ba)
+	}
+}
+
+func (c *Connection) unsubscribe(arr []string) {
+	ofreq := OpenfeedGatewayRequest{
+		Data: &OpenfeedGatewayRequest_SubscriptionRequest{
+			SubscriptionRequest: &SubscriptionRequest{
+				Token:         c.loginResponse.GetToken(),
+				Service:       Service_REAL_TIME,
+				Unsubscribe:   true,
+				CorrelationId: 12345678,
+				Requests:      []*SubscriptionRequest_Request{},
+			},
+		},
 	}
 
+	for _, s := range arr {
+		ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests = append(
+			ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests,
+			&SubscriptionRequest_Request{
+				Data: &SubscriptionRequest_Request_Symbol{
+					Symbol: s,
+				},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
+			},
+		)
+	}
+
+	ba, _ := proto.Marshal(&ofreq)
+	c.connection.WriteMessage(2, ba)
+}
+
+func (c *Connection) generateSymbolRequest(arr []string) *OpenfeedGatewayRequest {
 	ofreq := OpenfeedGatewayRequest{
 		Data: &OpenfeedGatewayRequest_SubscriptionRequest{
 			SubscriptionRequest: &SubscriptionRequest{
@@ -499,19 +612,32 @@ func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 		},
 	}
 
-	for s := range c.symbolHandlers {
+	for _, s := range arr {
 		ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests = append(
 			ofreq.Data.(*OpenfeedGatewayRequest_SubscriptionRequest).SubscriptionRequest.Requests,
 			&SubscriptionRequest_Request{
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
-				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
 			},
 		)
 	}
 
 	return &ofreq
+}
+
+func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
+	if len(c.symbolHandlers) == 0 {
+		return nil
+	}
+
+	arr := make([]string, 0)
+	for s := range c.symbolHandlers {
+		arr = append(arr, s)
+	}
+
+	return c.generateSymbolRequest(arr)
 }
 
 // Login sends the login request to the server, and returns
