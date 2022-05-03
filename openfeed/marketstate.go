@@ -1,3 +1,9 @@
+// Copyright 2019 - 2022 Barchart.com, Inc. All rights reserved.
+// Use of this source code is governed by a MIT-style
+// license that can be found in the LICENSE file.
+
+// Package openfeed implements openfeed API.
+
 package openfeed
 
 import (
@@ -48,12 +54,18 @@ func (q *Quote) applyTrade(t *Trade) {
 }
 
 type MarketState struct {
-	quotes map[string]*Quote
+	quotes      map[string]*Quote
+	definitions map[int64]*InstrumentDefinition
+	defmap1     map[int64]string
+	defmap2     map[string]int64
 }
 
 func NewMarketState() MarketState {
 	return MarketState{
-		quotes: make(map[string]*Quote),
+		quotes:      make(map[string]*Quote),
+		definitions: make(map[int64]*InstrumentDefinition),
+		defmap1:     make(map[int64]string),
+		defmap2:     make(map[string]int64),
 	}
 }
 
@@ -61,9 +73,16 @@ func (m *MarketState) GetQuote(symbol string) *Quote {
 	return m.quotes[symbol]
 }
 
+func (m *MarketState) GetInstrumentDefinition(symbol string) *InstrumentDefinition {
+	i := m.defmap2[symbol]
+	return m.definitions[i]
+}
+
 func (m *MarketState) ProcessMessage(message *OpenfeedGatewayMessage) {
 	switch ty := message.Data.(type) {
 	case *OpenfeedGatewayMessage_InstrumentDefinition:
+		inst := message.GetInstrumentDefinition()
+		m.definitions[inst.GetMarketId()] = inst
 	case *OpenfeedGatewayMessage_InstrumentResponse:
 	case *OpenfeedGatewayMessage_MarketSnapshot:
 		ms := message.GetMarketSnapshot()
@@ -106,7 +125,14 @@ func (m *MarketState) ProcessMessage(message *OpenfeedGatewayMessage) {
 		default:
 			log.Printf("warn: unhandled MarketUpdate: %s. %s", reflect.TypeOf(mu.Data), ty)
 		}
-
+	case *OpenfeedGatewayMessage_SubscriptionResponse:
+		msg := message.GetSubscriptionResponse()
+		if msg.GetStatus().GetResult() == Result_SUCCESS {
+			m.defmap1[msg.GetMarketId()] = msg.GetSymbol()
+			m.defmap2[msg.GetSymbol()] = msg.GetMarketId()
+		} else {
+			log.Printf("error: unsuccessful subscription for %s, type %s, result: %s", msg.GetSymbol(), msg.GetSubscriptionType(), msg.GetStatus().GetResult())
+		}
 	default:
 		log.Printf("warn: unhandled message type. %s. %s", reflect.TypeOf(message.Data), ty)
 	}

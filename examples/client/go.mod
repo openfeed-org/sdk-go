@@ -4,4 +4,4 @@ replace github.com/openfeed-org/sdk-go => ../../
 
 require github.com/openfeed-org/sdk-go v0.1.3
 
-go 1.16
+go 1.18

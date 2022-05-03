@@ -100,6 +100,7 @@ message LoginRequest {
   sint64 correlationId = 1;
   string username = 2;
   string password = 3;
+  string clientVersion = 4;
 }
 message LoginResponse {
   sint64 correlationId = 1;
@@ -212,6 +213,7 @@ message SubscriptionResponse {
   sint32 channelId = 6;
   sint32 numberOfDefinitions = 7;
   SubscriptionType subscriptionType = 8;
+  bool unsubscribe = 9;
 }
 
 

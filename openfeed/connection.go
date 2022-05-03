@@ -1,4 +1,4 @@
-// Copyright 2019 Barchart.com, Inc. All rights reserved.
+// Copyright 2019 - 2022 Barchart.com, Inc. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 
