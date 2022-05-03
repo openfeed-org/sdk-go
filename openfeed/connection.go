@@ -123,7 +123,9 @@ func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler *Messag
 // Close closes the connection
 func (c *Connection) Close() {
 	if c.connection != nil {
+		log.Printf("Closing web socket")
 		c.connection.Close()
+		c.connection = nil
 	}
 }
 
@@ -248,15 +250,16 @@ func (c *Connection) Start() error {
 
 		// Connect
 		err := c.Connect()
-		if err != nil && connectCount == 0 {
-			return ErrNetworkConnect
+		if err != nil {
+			log.Printf("of: connection error: %v", err)
 		} else if err == nil {
-			log.Printf("of: connected to %s", c.server)
 			connectCount++
+			log.Printf("of: connected to %s count: %d", c.server, connectCount)
 
 			// Login
 			_, err := c.Login()
 			if err != nil {
+				log.Printf("of: Login. error: %v", err)
 				return err
 			}
 
@@ -264,21 +267,35 @@ func (c *Connection) Start() error {
 				// Request Exchanges
 				ofexreq := c.createExchangeRequest()
 				if ofexreq != nil {
+					log.Printf("Exch Sub: %v", ofexreq)
 					ba, _ := proto.Marshal(ofexreq)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Exchange sub. error: %v", err)
+						continue
+					}
 				}
 			} else {
 				// Request Symbols
 				ofsyreq := c.createSymbolRequest()
 				if ofsyreq != nil {
 					ba, _ := proto.Marshal(ofsyreq)
-					c.connection.WriteMessage(2, ba)
+					log.Printf("Sym Sub: %v", ofsyreq)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: Symbol sub. error: %v", err)
+						continue
+					}
 				}
 
 				ofsyreq2 := c.createOHLCRequest()
 				if ofsyreq2 != nil {
 					ba, _ := proto.Marshal(ofsyreq2)
-					c.connection.WriteMessage(2, ba)
+					err := c.connection.WriteMessage(2, ba)
+					if err != nil {
+						log.Printf("of: OHLC sub. error: %v", err)
+						continue
+					}
 				}
 
 			}
@@ -293,19 +310,20 @@ func (c *Connection) Start() error {
 					_, message, err := c.connection.ReadMessage()
 					if err != nil {
 						if keepReconnecting == true {
-							log.Printf("of: read error %v", err)
+							log.Printf("of: read error: %v", err)
 						}
-						c.connection = nil
+						// force reconnection
 						break
 					}
 
 					var ofmsg OpenfeedGatewayMessage
 					err = proto.Unmarshal(message, &ofmsg)
 					if err != nil {
-						log.Printf("of: unable to unmarshal gateway message. %v", err)
-
+						log.Printf("of: error, unable to unmarshal gateway message. %v", err)
 					} else {
+
 						m, _ := c.broadcastMessage(&ofmsg)
+						// Callback all message handlers
 						for _, h := range c.messageHandlers {
 							iface := *h
 							iface.NewMessage(&m)
@@ -322,7 +340,10 @@ func (c *Connection) Start() error {
 							}
 						}
 					}
-				}
+				} // end read loop
+
+				log.Printf("of: Exited Read Loop")
+				c.Close()
 				c.connected = false
 				close(chReader)
 			}()
@@ -331,21 +352,22 @@ func (c *Connection) Start() error {
 			for {
 				select {
 				case <-chReader:
+					log.Printf("Exit wait for read routine")
 					break L2
 				}
 			}
+
 		}
 
 		if keepReconnecting {
 			rand.Seed(time.Now().UnixNano())
 			sec := rand.Intn(4) + 1
-			log.Printf("of: disconnected due to netwrok error, reconnecting in %d seconds", sec)
+			log.Printf("of: disconnected due to network error, reconnecting in %d seconds", sec)
 			time.Sleep(time.Duration(sec) * time.Second)
-
 		} else {
 			break
 		}
-	}
+	} // reconnect loop
 
 	return nil
 }
@@ -383,6 +405,7 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		instrumentsBySymbol[idf.Symbol] = idf
 	case *OpenfeedGatewayMessage_InstrumentResponse:
 	case *OpenfeedGatewayMessage_LogoutResponse:
+		log.Printf("of:Logout %v", ofmsg.GetLogoutResponse())
 		msg.MessageType = MessageType_LOGOUT
 		expectInstrument = false
 	case *OpenfeedGatewayMessage_MarketSnapshot:
@@ -397,7 +420,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 	case *OpenfeedGatewayMessage_SubscriptionResponse:
 		msg.MessageType = MessageType_SUBSCRIPTION_RESPONSE
 		if c.exchangesMode {
-			ary = c.exchangeHandlers[ofmsg.GetSubscriptionResponse().Exchange]
+			rsp := ofmsg.GetSubscriptionResponse()
+			ary = c.exchangeHandlers[rsp.Exchange]
 		} else {
 			rsp := ofmsg.GetSubscriptionResponse()
 			c.symbolSubscriptions[rsp.GetMarketId()] = rsp.GetSymbol()
@@ -545,7 +569,7 @@ func (c *Connection) unsubscribe(arr []string) {
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
-				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
 			},
 		)
 	}
@@ -572,7 +596,7 @@ func (c *Connection) generateSymbolRequest(arr []string) *OpenfeedGatewayRequest
 				Data: &SubscriptionRequest_Request_Symbol{
 					Symbol: s,
 				},
-				SubscriptionType: []SubscriptionType{SubscriptionType_TRADES, SubscriptionType_QUOTE},
+				SubscriptionType: []SubscriptionType{SubscriptionType_QUOTE},
 			},
 		)
 	}
