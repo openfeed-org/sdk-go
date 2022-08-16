@@ -50,8 +50,16 @@ enum InstrumentTradingStatus {
   CROSS = 19;
   POST_CLOSE = 20;
   NO_CHANGE = 21;
-  // Not available for trading.
-  NAFT = 22;
+  NAFT = 22; // Not available for trading.
+  TRADING_RANGE_INDICATION = 23;
+  MARKET_IMBALANCE_BUY = 24;
+  MARKET_IMBALANCE_SELL = 25;
+  MOC_IMBALANCE_BUY = 26; // Market On Close Imbalance Buy
+  MOC_IMBALANCE_SELL = 27;
+  NO_MARKET_IMBALANCE = 28;
+  NO_MOC_IMBALANCE = 29;
+  SHORT_SELL_RESTRICTION = 30;
+  LIMIT_UP_LIMIT_DOWN = 31;
 }
 
 enum RegulationSHOShortSalePriceTest {
@@ -230,6 +238,8 @@ message MarketSession {
   NumberOfTrades numberOfTrades = 41;
   /// Monetary value
   MonetaryValue monetaryValue = 42;
+  // UTC Timestamp, nano seconds since Unix epoch
+  sint64 transactionTime = 43;
 }
 
 /// Snapshot for a market
@@ -303,6 +313,8 @@ message MarketSnapshot {
   VolumeAtPrice volumeAtPrice = 50;
   HighRolling highRolling = 51;
   LowRolling lowRolling = 52;
+  /// 'Z' session. Includes all trades, even the ones that do not update Last.
+  MarketSession zSession = 53;
 }
 
 enum SnapshotRequestResult {
@@ -355,6 +367,8 @@ message MarketUpdate {
   MarketSession previousSession = 13;
   /// True if message applies to regional/participant member
   bool regional = 14;
+  /// 'Z' session. Includes all trades, even the ones that do not update Last.
+  MarketSession zSession = 15;
 
   oneof data {
       News news = 20;
@@ -477,6 +491,8 @@ message BestBidOffer {
   reserved 31;
   /// True if regional/participant member quote
   bool regional = 32;
+  /// True if not persisted in the EOD database.
+  bool transient = 33;
 }
 
 /// Insert a new price level, pushing existing levels down
@@ -617,6 +633,10 @@ message Trade {
   /// time in nano seconds since epoch.
   sint64 transactionTime2 = 33;
   string consolidatedPriceIndicator = 34;
+  /// True if not persisted in the EOD database.
+  bool transient = 35;
+  /// Index short name used to identify index.
+  string indexShortName = 36;
 }
 
 ///  Trade Correction
@@ -804,6 +824,8 @@ message Settlement {
   SettlementSource settlementSource = 14;
   /// Used by CME ITC.
   string session = 15;
+  /// True if not persisted in the EOD database.
+  bool transient = 16;
   /// Reserved
   bool reserved = 127;
 }
@@ -933,6 +955,8 @@ message MarketSummary {
   SummaryType summaryType = 22;
   /// Total traded volume for the prior day.
   Volume prevVolume = 23;
+  /// True if not persisted in the EOD database.
+  bool transient = 24;
 }
 
 
