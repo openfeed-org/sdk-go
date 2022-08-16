@@ -260,6 +260,7 @@ func (c *Connection) Start() error {
 		err := c.Connect()
 		if err != nil {
 			log.Printf("of: connection error: %v", err)
+			c.Close()
 		} else if err == nil {
 			connectCount++
 			log.Printf("of: connected to %s count: %d", c.server, connectCount)

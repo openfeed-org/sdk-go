@@ -13,3 +13,4 @@ bin/
 *.out
 .vscode/launch.json
 examples/client/client
+.vscode
