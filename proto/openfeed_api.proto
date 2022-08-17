@@ -100,6 +100,8 @@ message LoginRequest {
   sint64 correlationId = 1;
   string username = 2;
   string password = 3;
+  string clientVersion = 4;
+  sint32 protocolVersion = 5;
 }
 message LoginResponse {
   sint64 correlationId = 1;
@@ -180,6 +182,20 @@ message ExchangeResponse {
   }
 }
 
+/// Symbol type for the subscription filter.
+enum SymbolType {
+  BARCHART = 0;
+  EXCHANGE = 1;
+}
+
+/// Bulk subscription filter.
+message BulkSubscriptionFilter {
+  /// Type of the symbol: Barchart of Exchange. Barchart is the default.
+  SymbolType symbolType = 1;
+  /// regular expression pattern for the symbol
+  string symbolPattern = 2;
+}
+
 /// Subscription Request
 message SubscriptionRequest {
   /// Client-assigned id for this request.  Response will include same id
@@ -201,6 +217,8 @@ message SubscriptionRequest {
     sint32 snapshotIntervalSeconds = 11;
     /// Spreads and Options must be explicitly requested.
     repeated InstrumentDefinition.InstrumentType instrumentType = 12;
+    /// Filter for the exchange and channel subscriptions.
+    repeated BulkSubscriptionFilter bulkSubscriptionFilter = 13;
    }
 }
 message SubscriptionResponse {
@@ -212,6 +230,8 @@ message SubscriptionResponse {
   sint32 channelId = 6;
   sint32 numberOfDefinitions = 7;
   SubscriptionType subscriptionType = 8;
+  bool unsubscribe = 9;
+  sint32 snapshotIntervalSeconds = 10;
 }
 
 
