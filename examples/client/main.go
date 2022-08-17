@@ -35,6 +35,7 @@ type ExampleMessageHandler struct {
 }
 
 func (hnd *ExampleMessageHandler) NewHeartbeat(msg *openfeed.HeartBeat) {
+	hnd.stats.HeartBeat++
 	t := time.Unix(0, msg.GetTransactionTime())
 	log.Printf("HB\t%v msg: %v", t, msg)
 }
@@ -42,36 +43,35 @@ func (hnd *ExampleMessageHandler) NewHeartbeat(msg *openfeed.HeartBeat) {
 func (hnd *ExampleMessageHandler) NewMessage(msg *openfeed.Message) {
 	switch msg.MessageType {
 	case openfeed.MessageType_HEARTBEAT:
-		hnd.stats.HeartBeat++
 		// Logged in HB handler
 	case openfeed.MessageType_INSTRUMENT_DEFINITION:
 		hnd.stats.InstrumentDefinition++
 		if hnd.li {
-			fmt.Println("INST DEF", msg.Message)
+			log.Printf("INST DEF: %v", msg.Message)
 		}
 	case openfeed.MessageType_OHLC:
 		hnd.stats.OHLC++
 		if hnd.lo {
-			fmt.Println("OHLC", msg.Message)
+			log.Printf("OHLC: %v", msg.Message)
 		}
 	case openfeed.MessageType_MARKET_SNAPSHOT:
 		hnd.stats.MarketSnapshot++
 		if hnd.ls {
-			fmt.Println("MKT SNAP", msg.Message)
+			log.Printf("MKT SNAP: %v", msg.Message)
 		}
 	case openfeed.MessageType_MARKET_UPDATE:
 		hnd.stats.MarketUpdate++
 		if hnd.lu {
-			fmt.Println("MKT UPD", msg.Message)
+			log.Printf("MKT UPD: %v", msg.Message)
 		}
 	case openfeed.MessageType_INSTRUMENT_RESPONSE:
-		fmt.Println("INST RSP", msg.Message)
+		log.Printf("INST RSP: %v", msg.Message)
 	case openfeed.MessageType_SUBSCRIPTION_RESPONSE:
 		hnd.stats.SubscriptionResponse++
-		fmt.Println("SUB RESP", msg.Message)
+		log.Print("SUB RESP: %v", msg.Message)
 	default:
 		hnd.stats.Unknown++
-		fmt.Println("Unhandled message type: %d", msg.MessageType)
+		log.Printf("Unhandled message type: %d msg: %v", msg.MessageType, msg.Message)
 	}
 }
 
@@ -241,10 +241,10 @@ func main() {
 	hb := openfeed.HeartbeatHandler(&messageHandler)
 	conn.AddHeartbeatSubscription(&hb)
 
-	// Add a messge handler for all messages
-	allHnd := AllMessagesHandler{}
-	h := openfeed.MessageHandler(&allHnd)
-	conn.AddMessageSubscription(&h)
+	// Adds a messge handler for all messages
+	// allHnd := AllMessagesHandler{}
+	// h := openfeed.MessageHandler(&allHnd)
+	// conn.AddMessageSubscription(&h)
 
 	err := conn.Start()
 	if err == nil {
