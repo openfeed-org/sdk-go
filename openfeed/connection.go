@@ -269,7 +269,7 @@ func (c *Connection) Start() error {
 			_, err := c.Login()
 			if err != nil {
 				log.Printf("of: Login. error: %v", err)
-				continue
+				break
 			}
 
 			if c.exchangesMode {
