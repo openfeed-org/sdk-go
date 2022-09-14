@@ -488,6 +488,8 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 			iface := *h
 			iface.NewMessage(&msg)
 		}
+	} else {
+		log.Printf("ERROR: No handler for exchange: %s msg: %v", idf.ExchangeCode, ofmsg)
 	}
 
 	return msg, nil
