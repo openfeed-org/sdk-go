@@ -446,6 +446,10 @@ func (c *Connection) broadcastMessage(ofmsg *OpenfeedGatewayMessage) (Message, e
 		if c.exchangesMode {
 			rsp := ofmsg.GetSubscriptionResponse()
 			ary = c.exchangeHandlers[rsp.Exchange]
+			if ary == nil {
+				log.Printf("ERROR: NO handler found for exchange: %s", rsp.Exchange)
+				return Message{MessageType: MessageType_SUBSCRIPTION_RESPONSE, Message: ofmsg.Data}, fmt.Errorf("of: NO handler found for exchange: %v", rsp)
+			}
 		} else {
 			rsp := ofmsg.GetSubscriptionResponse()
 			c.symbolSubscriptions[rsp.GetMarketId()] = rsp.GetSymbol()
