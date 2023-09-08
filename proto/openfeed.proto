@@ -635,6 +635,8 @@ message Trade {
   string consolidatedPriceIndicator = 34;
   /// True if not persisted in the EOD database.
   bool transient = 35;
+  /// Index short name used to identify index.
+  string indexShortName = 36;
 }
 
 ///  Trade Correction

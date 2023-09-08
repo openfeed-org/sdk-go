@@ -35,8 +35,9 @@ var (
 
 // Credentials encapsulates the username/password
 type Credentials struct {
-	Username string
-	Password string
+	Username    string
+	Password    string
+	AccessToken string // This takes precedance
 }
 
 // Connection is the main struct that holds the
@@ -624,6 +625,7 @@ func (c *Connection) Login() (bool, error) {
 		LoginRequest: &LoginRequest{
 			Username: c.credentials.Username,
 			Password: c.credentials.Password,
+			Jwt:      c.credentials.AccessToken,
 		},
 	}
 

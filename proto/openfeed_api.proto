@@ -60,6 +60,8 @@ message OpenfeedGatewayMessage {
 enum Result {
   UNKNOWN_RESULT = 0;
   SUCCESS = 1;
+  JWT_EXPIRED = 113;
+  JWT_INVALID = 114;
   DUPLICATE_LOGIN = 115;
   INVALID_SYMBOL = 116;
   INVALID_MARKET_ID = 117;
@@ -101,6 +103,9 @@ message LoginRequest {
   string username = 2;
   string password = 3;
   string clientVersion = 4;
+  sint32 protocolVersion = 5;
+  /// JSON Web Token
+  string jwt = 6;
 }
 message LoginResponse {
   sint64 correlationId = 1;
@@ -137,6 +142,7 @@ message InstrumentResponse {
   sint64 marketId = 5;
   string exchange = 6;
   sint32 channelId = 7;
+  sint32 exchangeId = 8;
 }
 
 /// Instrument References, returns InstrumentReferenceResponse(s)
@@ -163,6 +169,7 @@ message InstrumentReferenceResponse {
   string ddfExchange = 9; 
   string ddfBaseCode = 10; 
   string exchangeSymbol = 11;
+  sint32 exchangeId = 12;
 }
 
 /// Exchange Request, returns ExchangeResponse.  Gives available exchanges.
@@ -178,7 +185,22 @@ message ExchangeResponse {
     string code = 1;
     string description = 2;
     repeated string aliases = 3;
+    sint32 exchangeId = 4;
   }
+}
+
+/// Symbol type for the subscription filter.
+enum SymbolType {
+  BARCHART = 0;
+  EXCHANGE = 1;
+}
+
+/// Bulk subscription filter.
+message BulkSubscriptionFilter {
+  /// Type of the symbol: Barchart of Exchange. Barchart is the default.
+  SymbolType symbolType = 1;
+  /// regular expression pattern for the symbol
+  string symbolPattern = 2;
 }
 
 /// Subscription Request
@@ -202,6 +224,8 @@ message SubscriptionRequest {
     sint32 snapshotIntervalSeconds = 11;
     /// Spreads and Options must be explicitly requested.
     repeated InstrumentDefinition.InstrumentType instrumentType = 12;
+    /// Filter for the exchange and channel subscriptions.
+    repeated BulkSubscriptionFilter bulkSubscriptionFilter = 13;
    }
 }
 message SubscriptionResponse {
@@ -214,6 +238,7 @@ message SubscriptionResponse {
   sint32 numberOfDefinitions = 7;
   SubscriptionType subscriptionType = 8;
   bool unsubscribe = 9;
+  sint32 snapshotIntervalSeconds = 10;
 }
 
 

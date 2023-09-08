@@ -7,9 +7,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -82,21 +86,39 @@ func (hnd *AllMessagesHandler) NewMessage(msg *openfeed.Message) {
 	log.Printf("MSG\t%v", msg)
 }
 
+type BIMSResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"tokern_type"`
+}
+
+func GetBIMSToken(server, username, password string) BIMSResponse {
+	// Easy JWT getter. No external libs used.
+	sb := bytes.NewBufferString(fmt.Sprintf("{\"username\":\"%s\",\"password\":\"%s\",\"domain\":\"realtime\"}", username, password))
+	resp, _ := http.Post("https://"+server+"/authenticate", "application/json", sb)
+	ba, _ := io.ReadAll(resp.Body)
+	var bimsresp BIMSResponse
+	json.Unmarshal(ba, &bimsresp)
+
+	return bimsresp
+}
+
 const usage = `Usage:
 ofclient [flags] symbols|exchanges
 
 Flags:
--u	Required. Username
--p	Required. Password
--s	Optional. Default is openfeed.aws.barchart.com
--e	Optional. Change to exchanges mode
--t	Optional. Default is q. Subscription type. Values include:
-		o OHLC
-		q Quotes (includes trades)
--li  Optional. Log Instruments
--ls  Optional. Log Snapshots
--lu  Optional. Log Market Updates
--lo  Optional. Log OHLC
+-u      Required. Username
+-p      Required. Password
+-bims   Optional. BIMS server, token mode
+-s      Optional. Default is openfeed.aws.barchart.com
+-e      Optional. Change to exchanges mode
+-t      Optional. Default is q. Subscription type. Values include:
+            o OHLC
+            q Quotes (includes trades)
+-li     Optional. Log Instruments
+-ls     Optional. Log Snapshots
+-lu     Optional. Log Market Updates
+-lo     Optional. Log OHLC
 `
 
 func main() {
@@ -105,6 +127,7 @@ func main() {
 	username := flag.String("u", "", "The username")
 	password := flag.String("p", "", "The password")
 	server := flag.String("s", "openfeed.aws.barchart.com", "The server")
+	bims := flag.String("bims", "", "Use BIMS server, which changes connectivity to token-stle login")
 	li := flag.Bool("li", false, "Log Instruments")
 	ls := flag.Bool("ls", false, "Log Snapshots")
 	lu := flag.Bool("lu", false, "Log Market Updates")
@@ -118,11 +141,18 @@ func main() {
 		log.Fatalln(usage)
 	}
 
+	creds := openfeed.Credentials{}
+	if *bims != "" {
+		log.Printf("Using BIMS tokens %s", *bims)
+		b := GetBIMSToken(*bims, *username, *password)
+		creds.AccessToken = b.AccessToken
+	} else {
+		creds.Username = *username
+		creds.Password = *password
+	}
+
 	log.Printf("Using %s/%s connecting to %s\n", *username, *password, *server)
-	conn := openfeed.NewConnection(openfeed.Credentials{
-		Username: *username,
-		Password: *password,
-	}, *server)
+	conn := openfeed.NewConnection(creds, *server)
 
 	var messageHandler = ExampleMessageHandler{}
 	messageHandler.li = *li

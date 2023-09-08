@@ -197,6 +197,20 @@ message InstrumentDefinition {
   ///
   string subscriptionSymbol= 229;
 
+  /// The Month/ Day of expiration for futures and options. Corresponds to the expiration month.
+  MaturityDate contractMaturity = 230;
+
+  /// Barchart Underlying Symbol
+  string underlying = 231;
+  string commodity = 232;
+  /// Barchart Exchange Id
+  sint32 exchangeId = 233;
+  /// Barchart Price Scaling Exponent
+  sint32 priceScalingExponent = 234;
+  /// The Openfeed marketId of the underlying asset.
+  sint64 underlyingOpenfeedMarketId = 235;
+
+
   // #############################################
   enum InstrumentType {
     UNKNOWN_INSTRUMENT_TYPE = 0;
@@ -208,6 +222,8 @@ message InstrumentDefinition {
     SPREAD = 6;
     MUTUAL_FUND = 7;
     MONEY_MARKET_FUND = 8;
+    USER_DEFINED_SPREAD = 9;
+    EQUITY_OPTION = 10;
   }
 
   /// Market depth implementation type
@@ -265,7 +281,7 @@ message InstrumentDefinition {
     LAST_TRADE_DATE = 2;
 
     // Futures only
-    SETTLEMENT_DATE = 10;
+    MATURITY_DATE = 10;
     FIRST_DELIVERY_DATE = 11;
     LAST_DELIVERY_DATE = 12;
     FIRST_NOTICE_DATE = 13;
@@ -274,10 +290,15 @@ message InstrumentDefinition {
     LAST_HOLDING_DATE = 16;
     FIRST_POSITION_DATE = 17;
     LAST_POSITION_DATE = 18;
+
+    // Grain Bids
+    DELIVERY_START_DATE = 30;
+    DELIVERY_END_DATE = 31;
   }
 
   message Event {
     EventType type = 1;
+    /// Epoch time in ms
     sint64 date = 2;
   }
 
@@ -293,6 +314,9 @@ message InstrumentDefinition {
     sint32 ratio = 2;
 
     string symbol = 3;
+    string longSymbol = 4;
+    float legOptionDelta = 5;
+    float legPrice = 6;
     // Additional information about the leg will be found in the instrument definition
     // for the leg.  It is not included here to reduce duplication.
   }
@@ -313,6 +337,8 @@ message InstrumentDefinition {
     string vendor = 1;
     // The symbol assigned by the vendor.
     string symbol = 2;
+    // The long symbol assigned by the vendor. Includes 2 char year for futures.
+    string longSymbol = 3;
   }
 
   /// Recommended display format for prices.
