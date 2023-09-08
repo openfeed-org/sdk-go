@@ -638,6 +638,7 @@ func (c *Connection) Login() (bool, error) {
 
 	ba, _ := proto.Marshal(&ofreq)
 	c.connection.WriteMessage(2, ba)
+
 	// Get the login message
 	_, message, err := c.connection.ReadMessage()
 	if err != nil {
