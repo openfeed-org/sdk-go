@@ -92,15 +92,26 @@ type BIMSResponse struct {
 	TokenType    string `json:"tokern_type"`
 }
 
-func GetBIMSToken(server, username, password string) BIMSResponse {
+func GetBIMSToken(server, username, password string) (BIMSResponse, error) {
 	// Easy JWT getter. No external libs used.
 	sb := bytes.NewBufferString(fmt.Sprintf("{\"username\":\"%s\",\"password\":\"%s\",\"domain\":\"realtime\"}", username, password))
-	resp, _ := http.Post("https://"+server+"/authenticate", "application/json", sb)
-	ba, _ := io.ReadAll(resp.Body)
-	var bimsresp BIMSResponse
-	json.Unmarshal(ba, &bimsresp)
+	resp, err := http.Post("https://"+server+"/authenticate", "application/json", sb)
+	if err != nil {
+		return BIMSResponse{}, err
+	}
 
-	return bimsresp
+	ba, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return BIMSResponse{}, err
+	}
+
+	var bimsresp BIMSResponse
+	err = json.Unmarshal(ba, &bimsresp)
+	if err != nil {
+		return BIMSResponse{}, err
+	}
+
+	return bimsresp, nil
 }
 
 const usage = `Usage:
@@ -144,12 +155,17 @@ func main() {
 	creds := openfeed.Credentials{}
 	if *bims != "" {
 		log.Printf("Using BIMS tokens %s", *bims)
-		b := GetBIMSToken(*bims, *username, *password)
+		b, err := GetBIMSToken(*bims, *username, *password)
+		if err != nil {
+			log.Printf("failed to get BIMS token %v", err)
+			return
+		}
 		creds.AccessToken = b.AccessToken
 	} else {
 		creds.Username = *username
 		creds.Password = *password
 	}
+	fmt.Println("creds", creds)
 
 	log.Printf("Using %s/%s connecting to %s\n", *username, *password, *server)
 	conn := openfeed.NewConnection(creds, *server)
