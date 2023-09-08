@@ -621,12 +621,17 @@ func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 // Login sends the login request to the server, and returns
 // true/false with optional error information
 func (c *Connection) Login() (bool, error) {
-	ofgwlr := OpenfeedGatewayRequest_LoginRequest{
-		LoginRequest: &LoginRequest{
+	var ofgwlr = OpenfeedGatewayRequest_LoginRequest{}
+	switch c.credentials.AccessToken {
+	case "":
+		ofgwlr.LoginRequest = &LoginRequest{
 			Username: c.credentials.Username,
 			Password: c.credentials.Password,
-			Jwt:      c.credentials.AccessToken,
-		},
+		}
+	default:
+		ofgwlr.LoginRequest = &LoginRequest{
+			Jwt: c.credentials.AccessToken,
+		}
 	}
 
 	ofreq := OpenfeedGatewayRequest{Data: &ofgwlr}
