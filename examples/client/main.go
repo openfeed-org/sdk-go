@@ -165,7 +165,6 @@ func main() {
 		creds.Username = *username
 		creds.Password = *password
 	}
-	fmt.Println("creds", creds)
 
 	log.Printf("Using %s/%s connecting to %s\n", *username, *password, *server)
 	conn := openfeed.NewConnection(creds, *server)
