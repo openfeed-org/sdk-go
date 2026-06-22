@@ -7,6 +7,7 @@
 package openfeed
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -65,6 +66,7 @@ type Connection struct {
 	exchangeRequest     *SubRequest
 	gatewayRequests     []*OpenfeedGatewayRequest
 	connected           bool
+	messages            chan []byte
 }
 
 type HeartbeatHandler interface {
@@ -140,6 +142,7 @@ func (c *Connection) AddSymbolOHLCSubscription(symbols []string, handler *Messag
 func (c *Connection) Close() {
 	if c.connection != nil {
 		log.Printf("Closing web socket")
+		close(c.messages)
 		c.connection.Close()
 		c.connection = nil
 	}
@@ -344,7 +347,7 @@ func (c *Connection) Start() error {
 					// There's a server sent heartbeat every 10 seconds
 					c.connection.SetReadDeadline(time.Now().Add(15 * time.Second))
 					c.connected = true
-					_, message, err := c.connection.ReadMessage()
+					err := c.consumeMessages()
 					if err != nil {
 						if keepReconnecting == true {
 							log.Printf("of: read error: %v", err)
@@ -352,7 +355,17 @@ func (c *Connection) Start() error {
 						// force reconnection
 						break
 					}
+				} // end read loop
 
+				log.Printf("of: Exited Read Loop")
+				c.Close()
+				c.connected = false
+				close(chReader)
+			}()
+
+			// Handle messages
+			go func() {
+				for message := range c.messages {
 					var ofmsg OpenfeedGatewayMessage
 					err = proto.Unmarshal(message, &ofmsg)
 					if err != nil {
@@ -377,12 +390,7 @@ func (c *Connection) Start() error {
 							}
 						}
 					}
-				} // end read loop
-
-				log.Printf("of: Exited Read Loop")
-				c.Close()
-				c.connected = false
-				close(chReader)
+				}
 			}()
 
 		L2:
@@ -523,6 +531,7 @@ func (c *Connection) Connect() error {
 
 	if err == nil {
 		c.connection = conn
+		c.messages = make(chan []byte, 64) // arbitrary buffer size
 		return nil
 	}
 
@@ -688,8 +697,9 @@ func (c *Connection) createSymbolRequest() *OpenfeedGatewayRequest {
 func (c *Connection) Login() (bool, error) {
 	ofgwlr := OpenfeedGatewayRequest_LoginRequest{
 		LoginRequest: &LoginRequest{
-			Username: c.credentials.Username,
-			Password: c.credentials.Password,
+			Username:        c.credentials.Username,
+			Password:        c.credentials.Password,
+			ProtocolVersion: 1,
 		},
 	}
 
@@ -698,13 +708,13 @@ func (c *Connection) Login() (bool, error) {
 	ba, _ := proto.Marshal(&ofreq)
 	c.connection.WriteMessage(2, ba)
 	// Get the login message
-	_, message, err := c.connection.ReadMessage()
+	err := c.consumeMessages()
 	if err != nil {
 		return false, err
 	}
 
 	var ofmsg OpenfeedGatewayMessage
-	err = proto.Unmarshal(message, &ofmsg)
+	err = proto.Unmarshal(<-c.messages, &ofmsg)
 	if err != nil {
 		return false, fmt.Errorf("unable to unmarshal gateway message. %v", err)
 	}
@@ -726,4 +736,29 @@ func (c *Connection) Login() (bool, error) {
 	}
 
 	return false, fmt.Errorf("of: login failed, invalid response")
+}
+
+// consumeMessages consumes multiple messages per frame via v1 message protocol.
+// publishes sub-messages through c.messages
+func (c *Connection) consumeMessages() error {
+	_, message, err := c.connection.ReadMessage()
+	if err != nil {
+		return err
+	}
+
+	var off int
+	var lng int
+	var msg []byte
+
+	for off+2 <= len(message) {
+		lng = int(binary.BigEndian.Uint16(message[off : off+2]))
+		if lng == 0 || off+2+lng > len(message) {
+			return ErrNetworkRead
+		}
+		msg = message[off+2 : off+2+lng]
+		c.messages <- msg
+		off += lng + 2
+	}
+
+	return nil
 }
